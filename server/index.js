@@ -6,11 +6,25 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://tan-chat-gamma.vercel.app"
+  ],
+  credentials: true
+}));
+
 
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: { origin: "http://localhost:3000" }
+  cors: {
+    origin: [
+      "http://localhost:3000",
+      "https://tan-chat-gamma.vercel.app"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
 });
 
 // Initialize Supabase
@@ -67,7 +81,8 @@ io.on('connection', async (socket) => {
   });
 });
 
-const PORT = 4000;
+const PORT = process.env.PORT || 4000;
+
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('Connected to Supabase ✓');
