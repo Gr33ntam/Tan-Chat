@@ -3,12 +3,21 @@ import io from 'socket.io-client';
 
 const socket = io('https://tan-chat.onrender.com');
 
+// Available rooms
+const ROOMS = [
+  { id: 'general', name: '💬 General', color: '#2196F3' },
+  { id: 'forex', name: '💱 Forex', color: '#4CAF50' },
+  { id: 'crypto', name: '₿ Crypto', color: '#FF9800' },
+  { id: 'stocks', name: '📈 Stocks', color: '#9C27B0' }
+];
+
 function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [username, setUsername] = useState('');
   const [joined, setJoined] = useState(false);
   const [showSignalForm, setShowSignalForm] = useState(false);
+  const [currentRoom, setCurrentRoom] = useState('general');
   const messagesEndRef = useRef(null);
 
   // Signal form state
@@ -24,6 +33,13 @@ function Chat() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // Join room when component mounts or room changes
+  useEffect(() => {
+    if (joined) {
+      socket.emit('join_room', currentRoom);
+    }
+  }, [currentRoom, joined]);
 
   useEffect(() => {
     socket.on('previous_messages', (msgs) => {
@@ -48,6 +64,7 @@ function Chat() {
         type: 'text',
         username,
         text: input,
+        room: currentRoom,
         timestamp: new Date().toISOString()
       });
       setInput('');
@@ -77,6 +94,7 @@ function Chat() {
       socket.emit('send_message', {
         type: 'signal',
         username,
+        room: currentRoom,
         signal: {
           pair: signalData.pair,
           direction: signalData.direction,
@@ -107,6 +125,11 @@ function Chat() {
       minute: '2-digit',
       hour12: true 
     });
+  };
+
+  const switchRoom = (roomId) => {
+    setCurrentRoom(roomId);
+    setMessages([]); // Clear messages while loading
   };
 
   if (!joined) {
@@ -157,6 +180,8 @@ function Chat() {
     );
   }
 
+  const currentRoomInfo = ROOMS.find(r => r.id === currentRoom);
+
   return (
     <div style={{ 
       padding: '20px', 
@@ -183,9 +208,39 @@ function Chat() {
         <div style={{ fontSize: '24px' }}>📊</div>
       </div>
 
+      {/* Room Selector */}
+      <div style={{
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '15px',
+        flexWrap: 'wrap'
+      }}>
+        {ROOMS.map(room => (
+          <button
+            key={room.id}
+            onClick={() => switchRoom(room.id)}
+            style={{
+              flex: 1,
+              padding: '12px',
+              backgroundColor: currentRoom === room.id ? room.color : '#fff',
+              color: currentRoom === room.id ? '#fff' : '#333',
+              border: `2px solid ${room.color}`,
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              minWidth: '120px'
+            }}
+          >
+            {room.name}
+          </button>
+        ))}
+      </div>
+
       {/* Messages */}
       <div style={{ 
-        border: '2px solid #e0e0e0', 
+        border: `2px solid ${currentRoomInfo.color}`, 
         height: '450px', 
         overflowY: 'auto',
         marginBottom: '15px',
@@ -201,7 +256,7 @@ function Chat() {
             marginTop: '150px',
             fontSize: '16px'
           }}>
-            No messages yet. Start the conversation! 💬
+            No messages in {currentRoomInfo.name} yet. Start the conversation! 💬
           </div>
         )}
         {messages.map((msg, i) => (
@@ -214,7 +269,7 @@ function Chat() {
                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                  <strong style={{ color: '#2196F3' }}>{msg.username}</strong>
+                  <strong style={{ color: currentRoomInfo.color }}>{msg.username}</strong>
                   <span style={{ fontSize: '12px', color: '#999' }}>
                     {formatTime(msg.timestamp)}
                   </span>
@@ -385,11 +440,11 @@ function Chat() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-          placeholder="Type a message..."
+          placeholder={`Message ${currentRoomInfo.name}...`}
           style={{ 
             flex: 1, 
             padding: '12px',
-            border: '2px solid #ddd',
+            border: `2px solid ${currentRoomInfo.color}`,
             borderRadius: '8px',
             fontSize: '15px'
           }}
@@ -398,7 +453,7 @@ function Chat() {
           onClick={sendMessage}
           style={{
             padding: '12px 24px',
-            backgroundColor: '#2196F3',
+            backgroundColor: currentRoomInfo.color,
             color: 'white',
             border: 'none',
             cursor: 'pointer',
