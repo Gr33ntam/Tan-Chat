@@ -3,13 +3,20 @@ import io from 'socket.io-client';
 
 const socket = io('https://tan-chat.onrender.com');
 
-// Available rooms
+// Available rooms with tier requirements
 const ROOMS = [
-  { id: 'general', name: '💬 General', color: '#2196F3' },
-  { id: 'forex', name: '💱 Forex', color: '#4CAF50' },
-  { id: 'crypto', name: '₿ Crypto', color: '#FF9800' },
-  { id: 'stocks', name: '📈 Stocks', color: '#9C27B0' }
+  { id: 'general', name: '💬 General', color: '#2196F3', requiredTier: 'free' },
+  { id: 'forex', name: '💱 Forex', color: '#4CAF50', requiredTier: 'pro' },
+  { id: 'crypto', name: '₿ Crypto', color: '#FF9800', requiredTier: 'pro' },
+  { id: 'stocks', name: '📈 Stocks', color: '#9C27B0', requiredTier: 'premium' }
 ];
+
+// Subscription tiers
+const TIERS = {
+  free: { name: 'Free', price: '$0', rooms: ['General'] },
+  pro: { name: 'Pro', price: '$9.99/mo', rooms: ['General', 'Forex', 'Crypto'] },
+  premium: { name: 'Premium', price: '$19.99/mo', rooms: ['General', 'Forex', 'Crypto', 'Stocks'] }
+};
 
 function Chat() {
   const [messages, setMessages] = useState([]);
@@ -18,6 +25,9 @@ function Chat() {
   const [joined, setJoined] = useState(false);
   const [showSignalForm, setShowSignalForm] = useState(false);
   const [currentRoom, setCurrentRoom] = useState('general');
+  const [userTier, setUserTier] = useState('free');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedUpgradeTier, setSelectedUpgradeTier] = useState(null);
   const messagesEndRef = useRef(null);
 
   // Signal form state
@@ -34,14 +44,20 @@ function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Join room when component mounts or room changes
+  // Register user and get tier
   useEffect(() => {
-    if (joined) {
-      socket.emit('join_room', currentRoom);
+    if (joined && username) {
+      socket.emit('register_user', username);
     }
-  }, [currentRoom, joined]);
+  }, [joined, username]);
 
+  // Socket listeners
   useEffect(() => {
+    socket.on('user_registered', (data) => {
+      setUserTier(data.tier);
+      console.log('User registered:', data);
+    });
+
     socket.on('previous_messages', (msgs) => {
       setMessages(msgs);
       setTimeout(scrollToBottom, 100);
@@ -52,11 +68,38 @@ function Chat() {
       setTimeout(scrollToBottom, 100);
     });
 
+    socket.on('room_locked', (data) => {
+      alert(`🔒 ${data.message}\n\nUpgrade to unlock this room!`);
+      setShowUpgradeModal(true);
+      setSelectedUpgradeTier(data.requiredTier);
+    });
+
+    socket.on('upgrade_success', (data) => {
+      setUserTier(data.tier);
+      alert(`🎉 Upgraded to ${data.tier.toUpperCase()}!\n\nYou now have access to more rooms!`);
+      setShowUpgradeModal(false);
+    });
+
+    socket.on('upgrade_error', (message) => {
+      alert('❌ Upgrade failed. Please try again.');
+    });
+
     return () => {
+      socket.off('user_registered');
       socket.off('previous_messages');
       socket.off('new_message');
+      socket.off('room_locked');
+      socket.off('upgrade_success');
+      socket.off('upgrade_error');
     };
   }, []);
+
+  // Join room when component mounts or room changes
+  useEffect(() => {
+    if (joined && username) {
+      socket.emit('join_room', { room: currentRoom, username });
+    }
+  }, [currentRoom, joined, username]);
 
   const sendMessage = () => {
     if (input.trim()) {
@@ -106,7 +149,6 @@ function Chat() {
         timestamp: new Date().toISOString()
       });
 
-      // Reset form
       setSignalData({
         pair: '',
         direction: 'BUY',
@@ -129,7 +171,19 @@ function Chat() {
 
   const switchRoom = (roomId) => {
     setCurrentRoom(roomId);
-    setMessages([]); // Clear messages while loading
+    setMessages([]);
+  };
+
+  const hasAccessToRoom = (room) => {
+    const tierHierarchy = { free: 0, pro: 1, premium: 2 };
+    const userLevel = tierHierarchy[userTier] || 0;
+    const requiredLevel = tierHierarchy[room.requiredTier] || 0;
+    return userLevel >= requiredLevel;
+  };
+
+  const handleUpgrade = (tier) => {
+    // Mock payment - in real app, this would go to Stripe
+    socket.emit('upgrade_subscription', { username, tier });
   };
 
   if (!joined) {
@@ -189,6 +243,7 @@ function Chat() {
       margin: '0 auto',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     }}>
+      {/* Header */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -202,10 +257,24 @@ function Chat() {
         <div>
           <h2 style={{ margin: 0, color: '#333' }}>Trader Chat</h2>
           <p style={{ margin: '5px 0 0 0', color: '#666', fontSize: '14px' }}>
-            Logged in as: <strong>{username}</strong>
+            <strong>{username}</strong> · {userTier === 'free' ? '🆓 Free' : userTier === 'pro' ? '💎 Pro' : '👑 Premium'}
           </p>
         </div>
-        <div style={{ fontSize: '24px' }}>📊</div>
+        <button
+          onClick={() => setShowUpgradeModal(true)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: userTier === 'premium' ? '#ccc' : '#FF9800',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: userTier === 'premium' ? 'not-allowed' : 'pointer',
+            fontWeight: 'bold'
+          }}
+          disabled={userTier === 'premium'}
+        >
+          {userTier === 'premium' ? '✓ Premium' : '⬆️ Upgrade'}
+        </button>
       </div>
 
       {/* Room Selector */}
@@ -215,27 +284,32 @@ function Chat() {
         marginBottom: '15px',
         flexWrap: 'wrap'
       }}>
-        {ROOMS.map(room => (
-          <button
-            key={room.id}
-            onClick={() => switchRoom(room.id)}
-            style={{
-              flex: 1,
-              padding: '12px',
-              backgroundColor: currentRoom === room.id ? room.color : '#fff',
-              color: currentRoom === room.id ? '#fff' : '#333',
-              border: `2px solid ${room.color}`,
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              minWidth: '120px'
-            }}
-          >
-            {room.name}
-          </button>
-        ))}
+        {ROOMS.map(room => {
+          const hasAccess = hasAccessToRoom(room);
+          return (
+            <button
+              key={room.id}
+              onClick={() => hasAccess ? switchRoom(room.id) : setShowUpgradeModal(true)}
+              style={{
+                flex: 1,
+                padding: '12px',
+                backgroundColor: currentRoom === room.id ? room.color : '#fff',
+                color: currentRoom === room.id ? '#fff' : hasAccess ? '#333' : '#999',
+                border: `2px solid ${room.color}`,
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: hasAccess ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s',
+                minWidth: '120px',
+                opacity: hasAccess ? 1 : 0.5,
+                position: 'relative'
+              }}
+            >
+              {room.name} {!hasAccess && '🔒'}
+            </button>
+          );
+        })}
       </div>
 
       {/* Messages */}
@@ -484,6 +558,163 @@ function Chat() {
       >
         📊 {showSignalForm ? 'Hide Signal Form' : 'Post Trading Signal'}
       </button>
+
+      {/* Upgrade Modal */}
+      {showUpgradeModal && (
+        <UpgradeModal 
+          currentTier={userTier}
+          onClose={() => setShowUpgradeModal(false)}
+          onUpgrade={handleUpgrade}
+          suggestedTier={selectedUpgradeTier}
+        />
+      )}
+    </div>
+  );
+}
+
+// Upgrade Modal Component
+function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '30px',
+        maxWidth: '600px',
+        width: '90%',
+        maxHeight: '90vh',
+        overflowY: 'auto'
+      }}>
+        <h2 style={{ marginTop: 0, textAlign: 'center' }}>🚀 Upgrade Your Plan</h2>
+        <p style={{ textAlign: 'center', color: '#666', marginBottom: '30px' }}>
+          Get access to premium trading rooms and exclusive features
+        </p>
+
+        {/* Tier Cards */}
+        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          {Object.entries(TIERS).map(([tier, info]) => {
+            const isCurrent = tier === currentTier;
+            const isSuggested = tier === suggestedTier;
+            
+            return (
+              <div key={tier} style={{
+                flex: 1,
+                minWidth: '150px',
+                border: isSuggested ? '3px solid #FF9800' : '2px solid #ddd',
+                borderRadius: '12px',
+                padding: '20px',
+                backgroundColor: isCurrent ? '#f0f0f0' : '#fff',
+                position: 'relative'
+              }}>
+                {isSuggested && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-10px',
+                    right: '10px',
+                    backgroundColor: '#FF9800',
+                    color: 'white',
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    fontWeight: 'bold'
+                  }}>
+                    Recommended
+                  </div>
+                )}
+                
+                <h3 style={{ marginTop: 0, textAlign: 'center' }}>
+                  {tier === 'free' ? '🆓' : tier === 'pro' ? '💎' : '👑'} {info.name}
+                </h3>
+                <p style={{ 
+                  textAlign: 'center', 
+                  fontSize: '24px', 
+                  fontWeight: 'bold',
+                  margin: '10px 0',
+                  color: '#333'
+                }}>
+                  {info.price}
+                </p>
+                
+                <div style={{ marginTop: '15px' }}>
+                  <strong>Access to:</strong>
+                  <ul style={{ paddingLeft: '20px', margin: '10px 0' }}>
+                    {info.rooms.map(room => (
+                      <li key={room}>{room}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {!isCurrent && tier !== 'free' && (
+                  <button
+                    onClick={() => {
+                      onUpgrade(tier);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      backgroundColor: isSuggested ? '#FF9800' : '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      marginTop: '10px'
+                    }}
+                  >
+                    Upgrade to {info.name}
+                  </button>
+                )}
+
+                {isCurrent && (
+                  <div style={{
+                    width: '100%',
+                    padding: '10px',
+                    backgroundColor: '#ddd',
+                    color: '#666',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    fontWeight: 'bold',
+                    marginTop: '10px'
+                  }}>
+                    Current Plan
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <p style={{ fontSize: '12px', color: '#999', textAlign: 'center', marginTop: '20px' }}>
+          💳 This is a mock payment. In production, you'd be redirected to Stripe.
+        </p>
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%',
+            padding: '12px',
+            backgroundColor: '#f0f0f0',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginTop: '10px'
+          }}
+        >
+          Close
+        </button>
+      </div>
     </div>
   );
 }
