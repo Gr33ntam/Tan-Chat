@@ -39,6 +39,22 @@ const ROOM_ACCESS = {
   premium: ['general', 'forex', 'crypto', 'stocks']
 };
 
+// Track online users per room
+const onlineUsers = {
+  general: new Set(),
+  forex: new Set(),
+  crypto: new Set(),
+  stocks: new Set()
+};
+
+// Track typing users per room
+const typingUsers = {
+  general: new Set(),
+  forex: new Set(),
+  crypto: new Set(),
+  stocks: new Set()
+};
+
 // Helper: Get or create user
 async function getOrCreateUser(username) {
   try {
@@ -77,10 +93,18 @@ function hasRoomAccess(tier, room) {
   return ROOM_ACCESS[tier]?.includes(room) || false;
 }
 
+// Helper: Broadcast online users for a room
+function broadcastOnlineUsers(room) {
+  const users = Array.from(onlineUsers[room]);
+  io.to(room).emit('online_users', users);
+  console.log(`Broadcasting online users for ${room}:`, users);
+}
+
 io.on('connection', async (socket) => {
   console.log('User connected:', socket.id);
   
   let currentUser = null;
+  let currentRoom = null;
   
   // Register user
   socket.on('register_user', async (username) => {
@@ -117,15 +141,23 @@ io.on('connection', async (socket) => {
       return;
     }
     
-    // Leave all previous rooms
-    const rooms = Array.from(socket.rooms);
-    rooms.forEach(r => {
-      if (r !== socket.id) socket.leave(r);
-    });
+    // Remove user from previous room
+    if (currentRoom) {
+      socket.leave(currentRoom);
+      onlineUsers[currentRoom].delete(username);
+      typingUsers[currentRoom].delete(username);
+      broadcastOnlineUsers(currentRoom);
+      io.to(currentRoom).emit('user_stop_typing', { username, room: currentRoom });
+    }
     
     // Join the new room
     socket.join(room);
+    currentRoom = room;
+    onlineUsers[room].add(username);
     console.log(`User ${socket.id} (${username}) joined room: ${room}`);
+    
+    // Broadcast updated online users
+    broadcastOnlineUsers(room);
     
     // Load messages for this room
     try {
@@ -155,10 +187,16 @@ io.on('connection', async (socket) => {
         return;
       }
       
+      // Initialize reactions as empty object
+      const messageData = {
+        ...data,
+        reactions: {}
+      };
+      
       // Save to database
       const { data: newMessage, error } = await supabase
         .from('messages')
-        .insert([data])
+        .insert([messageData])
         .select()
         .single();
       
@@ -173,6 +211,166 @@ io.on('connection', async (socket) => {
       
     } catch (err) {
       console.error('Error processing message:', err);
+    }
+  });
+  
+  // Edit message
+  socket.on('edit_message', async ({ messageId, newText, username }) => {
+    try {
+      // Verify the message belongs to the user
+      const { data: message, error: fetchError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('id', messageId)
+        .single();
+      
+      if (fetchError || !message) {
+        socket.emit('edit_error', 'Message not found');
+        return;
+      }
+      
+      if (message.username !== username) {
+        socket.emit('edit_error', 'You can only edit your own messages');
+        return;
+      }
+      
+      // Update the message
+      const { data: updatedMessage, error: updateError } = await supabase
+        .from('messages')
+        .update({ 
+          text: newText,
+          edited: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', messageId)
+        .select()
+        .single();
+      
+      if (updateError) {
+        console.error('Error updating message:', updateError);
+        socket.emit('edit_error', 'Failed to update message');
+        return;
+      }
+      
+      // Broadcast the updated message to the room
+      io.to(message.room).emit('message_updated', updatedMessage);
+      console.log(`Message ${messageId} edited by ${username}`);
+      
+    } catch (err) {
+      console.error('Error editing message:', err);
+      socket.emit('edit_error', 'Failed to update message');
+    }
+  });
+  
+  // Delete message
+  socket.on('delete_message', async ({ messageId, username }) => {
+    try {
+      // Verify the message belongs to the user
+      const { data: message, error: fetchError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('id', messageId)
+        .single();
+      
+      if (fetchError || !message) {
+        socket.emit('delete_error', 'Message not found');
+        return;
+      }
+      
+      if (message.username !== username) {
+        socket.emit('delete_error', 'You can only delete your own messages');
+        return;
+      }
+      
+      // Delete the message
+      const { error: deleteError } = await supabase
+        .from('messages')
+        .delete()
+        .eq('id', messageId);
+      
+      if (deleteError) {
+        console.error('Error deleting message:', deleteError);
+        socket.emit('delete_error', 'Failed to delete message');
+        return;
+      }
+      
+      // Broadcast the deletion to the room
+      io.to(message.room).emit('message_deleted', messageId);
+      console.log(`Message ${messageId} deleted by ${username}`);
+      
+    } catch (err) {
+      console.error('Error deleting message:', err);
+      socket.emit('delete_error', 'Failed to delete message');
+    }
+  });
+  
+  // Add reaction to message
+  socket.on('add_reaction', async ({ messageId, username, emoji, room }) => {
+    try {
+      // Get the message
+      const { data: message, error: fetchError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('id', messageId)
+        .single();
+      
+      if (fetchError || !message) {
+        console.error('Message not found for reaction');
+        return;
+      }
+      
+      // Get current reactions or initialize empty object
+      let reactions = message.reactions || {};
+      
+      // Toggle reaction: add if not present, remove if present
+      if (reactions[emoji]) {
+        if (reactions[emoji].includes(username)) {
+          // Remove user from reaction
+          reactions[emoji] = reactions[emoji].filter(u => u !== username);
+          // Remove emoji if no users left
+          if (reactions[emoji].length === 0) {
+            delete reactions[emoji];
+          }
+        } else {
+          // Add user to reaction
+          reactions[emoji].push(username);
+        }
+      } else {
+        // Create new reaction
+        reactions[emoji] = [username];
+      }
+      
+      // Update message with new reactions
+      const { error: updateError } = await supabase
+        .from('messages')
+        .update({ reactions })
+        .eq('id', messageId);
+      
+      if (updateError) {
+        console.error('Error updating reactions:', updateError);
+        return;
+      }
+      
+      // Broadcast the updated reactions to the room
+      io.to(room).emit('message_reacted', { messageId, reactions });
+      console.log(`Reaction ${emoji} ${reactions[emoji]?.includes(username) ? 'added' : 'removed'} by ${username} on message ${messageId}`);
+      
+    } catch (err) {
+      console.error('Error adding reaction:', err);
+    }
+  });
+  
+  // Typing indicator
+  socket.on('typing', ({ username, room }) => {
+    if (!typingUsers[room]) typingUsers[room] = new Set();
+    typingUsers[room].add(username);
+    io.to(room).emit('user_typing', { username, room });
+  });
+  
+  socket.on('stop_typing', ({ username, room }) => {
+    if (typingUsers[room]) {
+      typingUsers[room].delete(username);
+      io.to(room).emit('user_stop_typing', { username, room });
     }
   });
   
@@ -195,7 +393,8 @@ io.on('connection', async (socket) => {
         return;
       }
       
-      socket.emit('upgrade_success', {
+      // Emit to all sockets (for account page updates)
+      io.emit('upgrade_success', {
         username: updatedUser.username,
         tier: updatedUser.subscription_tier
       });
@@ -209,6 +408,17 @@ io.on('connection', async (socket) => {
   
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    
+    // Remove user from online users and typing users
+    if (currentUser && currentRoom) {
+      onlineUsers[currentRoom].delete(currentUser.username);
+      typingUsers[currentRoom].delete(currentUser.username);
+      broadcastOnlineUsers(currentRoom);
+      io.to(currentRoom).emit('user_stop_typing', { 
+        username: currentUser.username, 
+        room: currentRoom 
+      });
+    }
   });
 });
 
@@ -217,4 +427,5 @@ const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('Connected to Supabase ✓');
+  console.log('Enhanced features: Avatars, Reactions, Edit/Delete, Online Status, Typing Indicators');
 });
