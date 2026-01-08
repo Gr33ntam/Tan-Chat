@@ -162,10 +162,10 @@ function Chat() {
 
   const formatTime = (timestamp) => {
     const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
       minute: '2-digit',
-      hour12: true 
+      hour12: true
     });
   };
 
@@ -188,9 +188,9 @@ function Chat() {
 
   if (!joined) {
     return (
-      <div style={{ 
-        padding: '20px', 
-        maxWidth: '400px', 
+      <div style={{
+        padding: '20px',
+        maxWidth: '400px',
         margin: '50px auto',
         backgroundColor: '#fff',
         borderRadius: '12px',
@@ -202,11 +202,15 @@ function Chat() {
         <input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && username && setJoined(true)}
-          placeholder="Enter your username"
-          style={{ 
-            width: '100%', 
-            padding: '12px', 
+          onKeyPress={(e) => {
+            if (e.key === 'Enter' && username) {
+              localStorage.setItem('username', username);
+              setJoined(true);
+            }
+          }} placeholder="Enter your username"
+          style={{
+            width: '100%',
+            padding: '12px',
             marginBottom: '12px',
             fontSize: '16px',
             border: '2px solid #ddd',
@@ -214,8 +218,13 @@ function Chat() {
             boxSizing: 'border-box'
           }}
         />
-        <button 
-          onClick={() => username && setJoined(true)}
+        <button
+          onClick={() => {
+            if (username) {
+              localStorage.setItem('username', username);
+              setJoined(true);
+            }
+          }}
           style={{
             width: '100%',
             padding: '12px',
@@ -237,9 +246,9 @@ function Chat() {
   const currentRoomInfo = ROOMS.find(r => r.id === currentRoom);
 
   return (
-    <div style={{ 
-      padding: '20px', 
-      maxWidth: '900px', 
+    <div style={{
+      padding: '20px',
+      maxWidth: '900px',
       margin: '0 auto',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     }}>
@@ -260,21 +269,39 @@ function Chat() {
             <strong>{username}</strong> · {userTier === 'free' ? '🆓 Free' : userTier === 'pro' ? '💎 Pro' : '👑 Premium'}
           </p>
         </div>
-        <button
-          onClick={() => setShowUpgradeModal(true)}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: userTier === 'premium' ? '#ccc' : '#FF9800',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: userTier === 'premium' ? 'not-allowed' : 'pointer',
-            fontWeight: 'bold'
-          }}
-          disabled={userTier === 'premium'}
-        >
-          {userTier === 'premium' ? '✓ Premium' : '⬆️ Upgrade'}
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => window.location.href = '/account'}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#2196F3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+          >
+            👤 Account
+          </button>
+          <button
+            onClick={() => setShowUpgradeModal(true)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: userTier === 'premium' ? '#ccc' : '#FF9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: userTier === 'premium' ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+            disabled={userTier === 'premium'}
+          >
+            {userTier === 'premium' ? '✓ Premium' : '⬆️ Upgrade'}
+          </button>
+        </div>
       </div>
 
       {/* Room Selector */}
@@ -313,9 +340,9 @@ function Chat() {
       </div>
 
       {/* Messages */}
-      <div style={{ 
-        border: `2px solid ${currentRoomInfo.color}`, 
-        height: '450px', 
+      <div style={{
+        border: `2px solid ${currentRoomInfo.color}`,
+        height: '450px',
         overflowY: 'auto',
         marginBottom: '15px',
         padding: '15px',
@@ -324,9 +351,9 @@ function Chat() {
         boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)'
       }}>
         {messages.length === 0 && (
-          <div style={{ 
-            textAlign: 'center', 
-            color: '#999', 
+          <div style={{
+            textAlign: 'center',
+            color: '#999',
             marginTop: '150px',
             fontSize: '16px'
           }}>
@@ -351,9 +378,9 @@ function Chat() {
                 <div style={{ color: '#333' }}>{msg.text}</div>
               </div>
             ) : (
-              <SignalCard 
-                signal={msg.signal} 
-                username={msg.username} 
+              <SignalCard
+                signal={msg.signal}
+                username={msg.username}
                 timestamp={msg.timestamp}
                 formatTime={formatTime}
               />
@@ -374,14 +401,14 @@ function Chat() {
           boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
         }}>
           <h3 style={{ marginTop: 0, color: '#1976D2' }}>📊 Post Trading Signal</h3>
-          
+
           <input
             placeholder="Pair (e.g. XAUUSD, BTCUSDT)"
             value={signalData.pair}
-            onChange={(e) => setSignalData({...signalData, pair: e.target.value.toUpperCase()})}
-            style={{ 
-              width: '100%', 
-              padding: '10px', 
+            onChange={(e) => setSignalData({ ...signalData, pair: e.target.value.toUpperCase() })}
+            style={{
+              width: '100%',
+              padding: '10px',
               marginBottom: '10px',
               border: '2px solid #ddd',
               borderRadius: '6px',
@@ -392,10 +419,10 @@ function Chat() {
 
           <select
             value={signalData.direction}
-            onChange={(e) => setSignalData({...signalData, direction: e.target.value})}
-            style={{ 
-              width: '100%', 
-              padding: '10px', 
+            onChange={(e) => setSignalData({ ...signalData, direction: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
               marginBottom: '10px',
               border: '2px solid #ddd',
               borderRadius: '6px',
@@ -411,10 +438,10 @@ function Chat() {
             type="number"
             step="0.01"
             value={signalData.entry}
-            onChange={(e) => setSignalData({...signalData, entry: e.target.value})}
-            style={{ 
-              width: '100%', 
-              padding: '10px', 
+            onChange={(e) => setSignalData({ ...signalData, entry: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
               marginBottom: '10px',
               border: '2px solid #ddd',
               borderRadius: '6px',
@@ -428,10 +455,10 @@ function Chat() {
             type="number"
             step="0.01"
             value={signalData.stopLoss}
-            onChange={(e) => setSignalData({...signalData, stopLoss: e.target.value})}
-            style={{ 
-              width: '100%', 
-              padding: '10px', 
+            onChange={(e) => setSignalData({ ...signalData, stopLoss: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
               marginBottom: '10px',
               border: '2px solid #ddd',
               borderRadius: '6px',
@@ -445,10 +472,10 @@ function Chat() {
             type="number"
             step="0.01"
             value={signalData.takeProfit}
-            onChange={(e) => setSignalData({...signalData, takeProfit: e.target.value})}
-            style={{ 
-              width: '100%', 
-              padding: '10px', 
+            onChange={(e) => setSignalData({ ...signalData, takeProfit: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
               marginBottom: '12px',
               border: '2px solid #ddd',
               borderRadius: '6px',
@@ -457,8 +484,8 @@ function Chat() {
             }}
           />
 
-          <p style={{ 
-            fontWeight: 'bold', 
+          <p style={{
+            fontWeight: 'bold',
             color: '#4CAF50',
             fontSize: '18px',
             marginBottom: '15px'
@@ -467,7 +494,7 @@ function Chat() {
           </p>
 
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button 
+            <button
               onClick={sendSignal}
               style={{
                 flex: 1,
@@ -484,7 +511,7 @@ function Chat() {
               Post Signal
             </button>
 
-            <button 
+            <button
               onClick={() => setShowSignalForm(false)}
               style={{
                 flex: 1,
@@ -505,25 +532,25 @@ function Chat() {
       )}
 
       {/* Message Input */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '10px', 
-        marginBottom: '10px' 
+      <div style={{
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '10px'
       }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
           placeholder={`Message ${currentRoomInfo.name}...`}
-          style={{ 
-            flex: 1, 
+          style={{
+            flex: 1,
             padding: '12px',
             border: `2px solid ${currentRoomInfo.color}`,
             borderRadius: '8px',
             fontSize: '15px'
           }}
         />
-        <button 
+        <button
           onClick={sendMessage}
           style={{
             padding: '12px 24px',
@@ -541,7 +568,7 @@ function Chat() {
       </div>
 
       {/* Post Signal Button */}
-      <button 
+      <button
         onClick={() => setShowSignalForm(!showSignalForm)}
         style={{
           width: '100%',
@@ -561,7 +588,7 @@ function Chat() {
 
       {/* Upgrade Modal */}
       {showUpgradeModal && (
-        <UpgradeModal 
+        <UpgradeModal
           currentTier={userTier}
           onClose={() => setShowUpgradeModal(false)}
           onUpgrade={handleUpgrade}
@@ -606,7 +633,7 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
           {Object.entries(TIERS).map(([tier, info]) => {
             const isCurrent = tier === currentTier;
             const isSuggested = tier === suggestedTier;
-            
+
             return (
               <div key={tier} style={{
                 flex: 1,
@@ -632,20 +659,20 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
                     Recommended
                   </div>
                 )}
-                
+
                 <h3 style={{ marginTop: 0, textAlign: 'center' }}>
                   {tier === 'free' ? '🆓' : tier === 'pro' ? '💎' : '👑'} {info.name}
                 </h3>
-                <p style={{ 
-                  textAlign: 'center', 
-                  fontSize: '24px', 
+                <p style={{
+                  textAlign: 'center',
+                  fontSize: '24px',
                   fontWeight: 'bold',
                   margin: '10px 0',
                   color: '#333'
                 }}>
                   {info.price}
                 </p>
-                
+
                 <div style={{ marginTop: '15px' }}>
                   <strong>Access to:</strong>
                   <ul style={{ paddingLeft: '20px', margin: '10px 0' }}>
@@ -722,7 +749,7 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
 // Signal Card Component
 function SignalCard({ signal, username, timestamp, formatTime }) {
   const isBuy = signal.direction === 'BUY';
-  
+
   return (
     <div style={{
       border: `3px solid ${isBuy ? '#4CAF50' : '#f44336'}`,
@@ -731,14 +758,14 @@ function SignalCard({ signal, username, timestamp, formatTime }) {
       backgroundColor: isBuy ? '#E8F5E9' : '#FFEBEE',
       boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
     }}>
-      <div style={{ 
+      <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: '12px'
       }}>
-        <div style={{ 
-          fontSize: '22px', 
+        <div style={{
+          fontSize: '22px',
           fontWeight: 'bold',
           color: isBuy ? '#2E7D32' : '#C62828'
         }}>
@@ -748,13 +775,13 @@ function SignalCard({ signal, username, timestamp, formatTime }) {
           {formatTime(timestamp)}
         </span>
       </div>
-      
+
       <div style={{ fontSize: '15px', lineHeight: '1.8' }}>
         <div><strong>Entry:</strong> {signal.entry}</div>
         <div><strong>Stop Loss:</strong> {signal.stopLoss}</div>
         <div><strong>Take Profit:</strong> {signal.takeProfit}</div>
-        <div style={{ 
-          fontWeight: 'bold', 
+        <div style={{
+          fontWeight: 'bold',
           color: '#4CAF50',
           fontSize: '18px',
           marginTop: '8px'
@@ -762,10 +789,10 @@ function SignalCard({ signal, username, timestamp, formatTime }) {
           R:R {signal.riskReward}
         </div>
       </div>
-      
-      <div style={{ 
-        fontSize: '13px', 
-        color: '#666', 
+
+      <div style={{
+        fontSize: '13px',
+        color: '#666',
         marginTop: '12px',
         borderTop: '1px solid #ccc',
         paddingTop: '10px'
