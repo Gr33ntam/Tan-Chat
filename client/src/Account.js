@@ -27,6 +27,11 @@ function Account({ username: propUsername, onLogout }) {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Generate avatar URL using DiceBear API
+  const getAvatar = (username) => {
+    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
+  };
+
   useEffect(() => {
     if (username) {
       loadUserData();
@@ -156,13 +161,26 @@ function Account({ username: propUsername, onLogout }) {
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <div>
-            <h1 style={{ margin: 0, color: '#333', fontSize: '32px' }}>
-              👤 My Account
-            </h1>
-            <p style={{ margin: '10px 0 0 0', color: '#666', fontSize: '16px' }}>
-              Welcome back, <strong>{username}</strong>!
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <img 
+              src={getAvatar(username)} 
+              alt={username}
+              style={{ 
+                width: '80px', 
+                height: '80px', 
+                borderRadius: '50%',
+                border: '4px solid #2196F3',
+                boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+              }}
+            />
+            <div>
+              <h1 style={{ margin: 0, color: '#333', fontSize: '32px' }}>
+                👤 My Account
+              </h1>
+              <p style={{ margin: '10px 0 0 0', color: '#666', fontSize: '16px' }}>
+                Welcome back, <strong>{username}</strong>!
+              </p>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button

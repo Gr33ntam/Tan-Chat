@@ -26,6 +26,11 @@ function Admin() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Generate avatar URL using DiceBear API
+  const getAvatar = (username) => {
+    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       loadUsers();
@@ -305,7 +310,7 @@ function Admin() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
-                  <th style={tableHeaderStyle}>Username</th>
+                  <th style={tableHeaderStyle}>User</th>
                   <th style={tableHeaderStyle}>Tier</th>
                   <th style={tableHeaderStyle}>Joined</th>
                   <th style={tableHeaderStyle}>Actions</th>
@@ -318,7 +323,19 @@ function Admin() {
                     backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa'
                   }}>
                     <td style={tableCellStyle}>
-                      <strong>{user.username}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <img 
+                          src={getAvatar(user.username)} 
+                          alt={user.username}
+                          style={{ 
+                            width: '40px', 
+                            height: '40px', 
+                            borderRadius: '50%',
+                            border: '2px solid #ddd'
+                          }}
+                        />
+                        <strong>{user.username}</strong>
+                      </div>
                     </td>
                     <td style={tableCellStyle}>
                       <span style={{
