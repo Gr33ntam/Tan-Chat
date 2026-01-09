@@ -165,6 +165,20 @@ function Admin() {
         );
     };
 
+    useEffect(() => {
+        const onDeleted = ({ messageId }) => {
+            setMessages((prev) => prev.filter((m) => m.id !== messageId));
+            setDeletingMessageId(null);
+        };
+
+        socket.on('message_deleted', onDeleted);
+
+        return () => {
+            socket.off('message_deleted', onDeleted);
+        };
+    }, []);
+
+
     const saveUserTier = async (user) => {
         try {
             setSavingUserId(user.id);
@@ -205,14 +219,8 @@ function Admin() {
             // ✅ NEW: Just emit socket event - let server handle the deletion
             socket.emit('delete_message', {
                 messageId: msg.id,
-                username: msg.username
+                username: 'admin'
             });
-
-            // Wait a moment for server to process, then reload
-            setTimeout(() => {
-                loadMessages(selectedRoom);
-                setDeletingMessageId(null);
-            }, 500);
 
         } catch (err) {
             console.error('Unexpected error deleting message:', err);
