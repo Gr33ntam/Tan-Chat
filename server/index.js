@@ -262,7 +262,7 @@ io.on('connection', async (socket) => {
     }
   });
   
-  // Delete message
+  // Delete message (user deleting their own message)
   socket.on('delete_message', async ({ messageId, username }) => {
     try {
       // Verify the message belongs to the user
@@ -295,7 +295,7 @@ io.on('connection', async (socket) => {
       }
       
       // Broadcast the deletion to the room
-      io.to(message.room).emit('message_deleted', messageId);
+      io.to(message.room).emit('message_deleted', { messageId });
       console.log(`Message ${messageId} deleted by ${username}`);
       
     } catch (err) {
@@ -403,6 +403,51 @@ io.on('connection', async (socket) => {
     } catch (err) {
       console.error('Error in upgrade:', err);
       socket.emit('upgrade_error', 'Failed to upgrade');
+    }
+  });
+
+  // Admin bulk delete: Delete all messages from a user in a room
+  socket.on('delete_user_messages', async ({ username, room }) => {
+    try {
+      const { data: deletedMessages, error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('username', username)
+        .eq('room', room)
+        .select('id');
+
+      if (error) {
+        console.error('Error deleting user messages:', error);
+        return;
+      }
+
+      // Broadcast all deleted message IDs
+      const messageIds = deletedMessages.map(m => m.id);
+      io.to(room).emit('messages_deleted', { messageIds });
+      console.log(`Deleted ${messageIds.length} messages from ${username} in ${room}`);
+    } catch (err) {
+      console.error('Error in delete_user_messages:', err);
+    }
+  });
+
+  // Admin bulk delete: Clear entire room
+  socket.on('clear_room_messages', async ({ room }) => {
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('room', room);
+
+      if (error) {
+        console.error('Error clearing room:', error);
+        return;
+      }
+
+      // Tell everyone in the room to clear all messages
+      io.to(room).emit('room_cleared');
+      console.log(`Cleared all messages in room ${room}`);
+    } catch (err) {
+      console.error('Error in clear_room_messages:', err);
     }
   });
   
