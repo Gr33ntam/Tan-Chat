@@ -214,8 +214,8 @@ function Admin() {
 
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
       
-      // Emit socket event so chat users see the deletion in real-time
-      socket.emit('message_deleted', { messageId: msg.id });
+      // ✅ FIXED: Changed 'message_deleted' to 'delete_message' and added username
+      socket.emit('delete_message', { messageId: msg.id, username: msg.username });
     } catch (err) {
       console.error('Unexpected error deleting message:', err);
       alert('Unexpected error deleting message');
