@@ -102,8 +102,16 @@ function Chat() {
       ));
     });
 
-    socket.on('message_deleted', (messageId) => {
-      setMessages(prev => prev.filter(msg => msg.id !== messageId));
+    socket.on('message_deleted', (data) => {
+      setMessages(prev => prev.filter(m => m.id !== data.messageId));
+    });
+
+    socket.on('messages_deleted', (data) => {
+      setMessages(prev => prev.filter(m => !data.messageIds.includes(m.id)));
+    });
+
+    socket.on('room_cleared', () => {
+      setMessages([]);
     });
 
     socket.on('message_reacted', (data) => {
@@ -153,6 +161,8 @@ function Chat() {
       socket.off('new_message');
       socket.off('message_updated');
       socket.off('message_deleted');
+      socket.off('messages_deleted');
+      socket.off('room_cleared');
       socket.off('message_reacted');
       socket.off('online_users');
       socket.off('user_typing');

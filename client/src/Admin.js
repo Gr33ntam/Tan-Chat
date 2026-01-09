@@ -2,6 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
+import io from 'socket.io-client';
+
+const socket = io('https://tan-chat.onrender.com');
 
 // SIMPLE ADMIN PASSWORD – CHANGE IF YOU WANT
 const ADMIN_PASSWORD = 'admin123';
@@ -210,6 +213,9 @@ function Admin() {
       }
 
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      
+      // Emit socket event so chat users see the deletion in real-time
+      socket.emit('message_deleted', { messageId: msg.id });
     } catch (err) {
       console.error('Unexpected error deleting message:', err);
       alert('Unexpected error deleting message');
@@ -236,7 +242,10 @@ function Admin() {
         return;
       }
 
-      // reload messages + stats
+      // Emit socket event so chat users see the deletion in real-time
+      socket.emit('clear_room_messages', { room: roomId });
+      
+      // Reload to see the change
       await loadMessages(roomId);
       await loadTotalMessages();
     } catch (err) {
@@ -266,6 +275,10 @@ function Admin() {
         return;
       }
 
+      // Emit socket event so chat users see the deletion in real-time
+      socket.emit('delete_user_messages', { username, room: roomId });
+      
+      // Reload to see the change
       await loadMessages(roomId);
       await loadTotalMessages();
     } catch (err) {
