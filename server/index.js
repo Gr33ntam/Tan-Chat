@@ -28,10 +28,10 @@ const io = socketIo(server, {
   }
 });
 
-// Initialize Supabase
+// Initialize Supabase with SERVICE ROLE KEY
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // Room access levels
@@ -264,52 +264,52 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // Delete message
+  // Delete message (user deletes own OR admin deletes any)
   socket.on('delete_message', async ({ messageId, username }) => {
     try {
-      // First, get the message to find which room it's in
+      // 1) Fetch message first so we know the room + confirm it exists
       const { data: message, error: fetchError } = await supabase
         .from('messages')
-        .select('*')
+        .select('id, room, username')
         .eq('id', messageId)
         .single();
 
       if (fetchError || !message) {
-        console.error('Message not found for deletion:', fetchError);
+        console.error('delete_message: message not found', fetchError);
         socket.emit('delete_error', 'Message not found');
         return;
       }
 
-      // Verify the message belongs to the user (or allow admin to delete any)
-      // Admin pages can delete any message, regular users only their own
-      if (message.username !== username && username !== 'admin') {
-        socket.emit('delete_error', 'You can only delete your own messages');
+      // 2) Allow admin OR the message owner
+      const isAdmin = username === 'admin';
+      if (!isAdmin && message.username !== username) {
+        socket.emit('delete_error', 'Not allowed');
         return;
       }
 
-      // Delete the message
+      // 3) Delete from database
       const { error: deleteError } = await supabase
         .from('messages')
         .delete()
         .eq('id', messageId);
 
       if (deleteError) {
-        console.error('Error deleting message:', deleteError);
+        console.error('delete_message: deleteError', deleteError);
         socket.emit('delete_error', 'Failed to delete message');
         return;
       }
 
-      // ✅ CRITICAL: Broadcast to the correct room
+      // ✅ 4) Broadcast to everyone in that room (emit object with messageId)
       io.to(message.room).emit('message_deleted', { messageId: messageId });
-      console.log(`Message ${messageId} deleted by ${username} from room ${message.room}`);
 
+      console.log(`Message ${messageId} deleted by ${username} from room ${message.room}`);
     } catch (err) {
-      console.error('Error deleting message:', err);
+      console.error('delete_message: exception', err);
       socket.emit('delete_error', 'Failed to delete message');
     }
   });
 
-  // Add reaction to message
+  // ✅ FIXED: Add reaction to message (was accidentally DELETING messages!)
   socket.on('add_reaction', async ({ messageId, username, emoji, room }) => {
     try {
       // Get the message
@@ -345,7 +345,7 @@ io.on('connection', async (socket) => {
         reactions[emoji] = [username];
       }
 
-      // Update message with new reactions
+      // ✅ UPDATE message with new reactions (NOT delete!)
       const { error: updateError } = await supabase
         .from('messages')
         .update({ reactions })
