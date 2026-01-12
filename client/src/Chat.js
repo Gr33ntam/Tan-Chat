@@ -1,15 +1,14 @@
-/* eslint-disable no-unused-expressions */
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 
 const socket = io('https://tan-chat.onrender.com');
 
-// Available rooms with tier requirements
-const ROOMS = [
-  { id: 'general', name: '💬 General', color: '#2196F3', requiredTier: 'free' },
-  { id: 'forex', name: '💱 Forex', color: '#4CAF50', requiredTier: 'pro' },
-  { id: 'crypto', name: '₿ Crypto', color: '#FF9800', requiredTier: 'pro' },
-  { id: 'stocks', name: '📈 Stocks', color: '#9C27B0', requiredTier: 'premium' }
+// Available PUBLIC rooms with tier requirements
+const PUBLIC_ROOMS = [
+  { id: 'general', name: '💬 General', color: '#2196F3', requiredTier: 'free', isPrivate: false },
+  { id: 'forex', name: '💱 Forex', color: '#4CAF50', requiredTier: 'pro', isPrivate: false },
+  { id: 'crypto', name: '₿ Crypto', color: '#FF9800', requiredTier: 'pro', isPrivate: false },
+  { id: 'stocks', name: '📈 Stocks', color: '#9C27B0', requiredTier: 'premium', isPrivate: false }
 ];
 
 // Subscription tiers
@@ -18,9 +17,6 @@ const TIERS = {
   pro: { name: 'Pro', price: '$9.99/mo', rooms: ['General', 'Forex', 'Crypto'] },
   premium: { name: 'Premium', price: '$19.99/mo', rooms: ['General', 'Forex', 'Crypto', 'Stocks'] }
 };
-
-// Available reactions
-const REACTIONS = ['👍', '❤️', '😂', '😮', '🎯', '🚀', '💎', '🔥'];
 
 function Chat() {
   const [messages, setMessages] = useState([]);
@@ -32,12 +28,10 @@ function Chat() {
   const [userTier, setUserTier] = useState('free');
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedUpgradeTier, setSelectedUpgradeTier] = useState(null);
-  const [onlineUsers, setOnlineUsers] = useState([]);
-  const [typingUsers, setTypingUsers] = useState([]);
-  const [editingMessage, setEditingMessage] = useState(null);
-  const [showReactionPicker, setShowReactionPicker] = useState(null);
+  const [isOfficialPost, setIsOfficialPost] = useState(false); // NEW: Official post toggle
+  const [privateRooms, setPrivateRooms] = useState([]); // NEW: Private rooms list
+  const [showPrivateRoomModal, setShowPrivateRoomModal] = useState(false); // NEW: Create room modal
   const messagesEndRef = useRef(null);
-  const typingTimeoutRef = useRef(null);
 
   // Signal form state
   const [signalData, setSignalData] = useState({
@@ -48,10 +42,11 @@ function Chat() {
     takeProfit: ''
   });
 
-  // Generate avatar URL using DiceBear API
-  const getAvatar = (username) => {
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
-  };
+  // Private room form state
+  const [newRoomData, setNewRoomData] = useState({
+    name: '',
+    description: ''
+  });
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -62,23 +57,9 @@ function Chat() {
   useEffect(() => {
     if (joined && username) {
       socket.emit('register_user', username);
+      loadPrivateRooms(); // NEW: Load user's private rooms
     }
   }, [joined, username]);
-
-  // Handle typing indicator
-  const handleTyping = () => {
-    socket.emit('typing', { username, room: currentRoom });
-    
-    // Clear existing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-    
-    // Set new timeout to stop typing after 2 seconds
-    typingTimeoutRef.current = setTimeout(() => {
-      socket.emit('stop_typing', { username, room: currentRoom });
-    }, 2000);
-  };
 
   // Socket listeners
   useEffect(() => {
@@ -97,49 +78,6 @@ function Chat() {
       setTimeout(scrollToBottom, 100);
     });
 
-    socket.on('message_updated', (updatedMsg) => {
-      setMessages(prev => prev.map(msg => 
-        msg.id === updatedMsg.id ? updatedMsg : msg
-      ));
-    });
-
-    socket.on('message_deleted', (data) => {
-      setMessages(prev => prev.filter(m => m.id !== data.messageId));
-    });
-
-    socket.on('messages_deleted', (data) => {
-      setMessages(prev => prev.filter(m => !data.messageIds.includes(m.id)));
-    });
-
-    socket.on('room_cleared', () => {
-      setMessages([]);
-    });
-
-    socket.on('message_reacted', (data) => {
-      setMessages(prev => prev.map(msg => 
-        msg.id === data.messageId ? { ...msg, reactions: data.reactions } : msg
-      ));
-    });
-
-    socket.on('online_users', (users) => {
-      setOnlineUsers(users);
-    });
-
-    socket.on('user_typing', (data) => {
-      if (data.username !== username) {
-        setTypingUsers(prev => {
-          if (!prev.includes(data.username)) {
-            return [...prev, data.username];
-          }
-          return prev;
-        });
-      }
-    });
-
-    socket.on('user_stop_typing', (data) => {
-      setTypingUsers(prev => prev.filter(u => u !== data.username));
-    });
-
     socket.on('room_locked', (data) => {
       alert(`🔒 ${data.message}\n\nUpgrade to unlock this room!`);
       setShowUpgradeModal(true);
@@ -156,23 +94,34 @@ function Chat() {
       alert('❌ Upgrade failed. Please try again.');
     });
 
+    // NEW: Private room listeners
+    socket.on('room_created', (data) => {
+      alert('✅ Private room created successfully!');
+      loadPrivateRooms();
+      setShowPrivateRoomModal(false);
+      setNewRoomData({ name: '', description: '' });
+    });
+
+    socket.on('room_error', (data) => {
+      alert(`❌ ${data.message}`);
+    });
+
+    socket.on('my_rooms', (data) => {
+      setPrivateRooms(data.rooms || []);
+    });
+
     return () => {
       socket.off('user_registered');
       socket.off('previous_messages');
       socket.off('new_message');
-      socket.off('message_updated');
-      socket.off('message_deleted');
-      socket.off('messages_deleted');
-      socket.off('room_cleared');
-      socket.off('message_reacted');
-      socket.off('online_users');
-      socket.off('user_typing');
-      socket.off('user_stop_typing');
       socket.off('room_locked');
       socket.off('upgrade_success');
       socket.off('upgrade_error');
+      socket.off('room_created');
+      socket.off('room_error');
+      socket.off('my_rooms');
     };
-  }, [username]);
+  }, []);
 
   // Join room when component mounts or room changes
   useEffect(() => {
@@ -181,50 +130,35 @@ function Chat() {
     }
   }, [currentRoom, joined, username]);
 
+  // NEW: Load user's private rooms
+  const loadPrivateRooms = () => {
+    socket.emit('get_my_rooms', { username });
+  };
+
+  // NEW: Check if user can create official posts
+  const canCreateOfficialPost = () => {
+    return userTier === 'pro' || userTier === 'premium';
+  };
+
+  // NEW: Check if user can create private rooms
+  const canCreatePrivateRoom = () => {
+    return userTier === 'premium';
+  };
+
   const sendMessage = () => {
     if (input.trim()) {
-      if (editingMessage) {
-        // Update existing message
-        socket.emit('edit_message', {
-          messageId: editingMessage.id,
-          newText: input,
-          username
-        });
-        setEditingMessage(null);
-      } else {
-        // Send new message
-        socket.emit('send_message', {
-          type: 'text',
-          username,
-          text: input,
-          room: currentRoom,
-          timestamp: new Date().toISOString()
-        });
-      }
+      socket.emit('send_message', {
+        type: 'text',
+        username,
+        text: input,
+        room: currentRoom,
+        timestamp: new Date().toISOString(),
+        is_official: isOfficialPost, // NEW: Include official post flag
+        post_type: isOfficialPost ? 'official_signal' : 'comment'
+      });
       setInput('');
-      socket.emit('stop_typing', { username, room: currentRoom });
+      setIsOfficialPost(false); // Reset after sending
     }
-  };
-
-  const handleEditMessage = (msg) => {
-    setEditingMessage(msg);
-    setInput(msg.text);
-  };
-
-  const handleDeleteMessage = (messageId) => {
-    if (window.confirm('Are you sure you want to delete this message?')) {
-      socket.emit('delete_message', { messageId, username });
-    }
-  };
-
-  const handleReaction = (messageId, emoji) => {
-    socket.emit('add_reaction', {
-      messageId,
-      username,
-      emoji,
-      room: currentRoom
-    });
-    setShowReactionPicker(null);
   };
 
   const calculateRR = () => {
@@ -259,7 +193,9 @@ function Chat() {
           takeProfit: parseFloat(signalData.takeProfit),
           riskReward: calculateRR()
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        is_official: isOfficialPost, // NEW: Include official post flag
+        post_type: isOfficialPost ? 'official_signal' : 'comment'
       });
 
       setSignalData({
@@ -270,6 +206,18 @@ function Chat() {
         takeProfit: ''
       });
       setShowSignalForm(false);
+      setIsOfficialPost(false); // Reset after sending
+    }
+  };
+
+  // NEW: Create private room
+  const createPrivateRoom = () => {
+    if (newRoomData.name.trim()) {
+      socket.emit('create_private_room', {
+        username,
+        roomName: newRoomData.name,
+        description: newRoomData.description
+      });
     }
   };
 
@@ -285,7 +233,6 @@ function Chat() {
   const switchRoom = (roomId) => {
     setCurrentRoom(roomId);
     setMessages([]);
-    setTypingUsers([]);
   };
 
   const hasAccessToRoom = (room) => {
@@ -357,374 +304,337 @@ function Chat() {
     );
   }
 
-  const currentRoomInfo = ROOMS.find(r => r.id === currentRoom);
+  // NEW: Combine public and private rooms
+  const allRooms = [
+    ...PUBLIC_ROOMS,
+    ...privateRooms.map(pr => ({
+      id: pr.private_rooms.room_id,
+      name: `🔒 ${pr.private_rooms.name}`,
+      color: '#673AB7',
+      requiredTier: 'premium',
+      isPrivate: true
+    }))
+  ];
+
+  const currentRoomInfo = allRooms.find(r => r.id === currentRoom) || PUBLIC_ROOMS[0];
 
   return (
     <div style={{
       padding: '20px',
-      maxWidth: '1100px',
+      maxWidth: '900px',
       margin: '0 auto',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     }}>
-      <div style={{ display: 'flex', gap: '20px' }}>
-        {/* Main Chat Area */}
-        <div style={{ flex: 1 }}>
-          {/* Header */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '20px',
-            padding: '15px',
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <img 
-                src={getAvatar(username)} 
-                alt={username}
-                style={{ 
-                  width: '48px', 
-                  height: '48px', 
-                  borderRadius: '50%',
-                  border: '3px solid #2196F3'
-                }}
-              />
-              <div>
-                <h2 style={{ margin: 0, color: '#333' }}>Trader Chat</h2>
-                <p style={{ margin: '5px 0 0 0', color: '#666', fontSize: '14px' }}>
-                  <strong>{username}</strong> · {userTier === 'free' ? '🆓 Free' : userTier === 'pro' ? '💎 Pro' : '👑 Premium'}
-                </p>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => window.location.href = '/account'}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#2196F3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '14px'
-                }}
-              >
-                👤 Account
-              </button>
-              <button
-                onClick={() => setShowUpgradeModal(true)}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: userTier === 'premium' ? '#ccc' : '#FF9800',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: userTier === 'premium' ? 'not-allowed' : 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '14px'
-                }}
-                disabled={userTier === 'premium'}
-              >
-                {userTier === 'premium' ? '✓ Premium' : '⬆️ Upgrade'}
-              </button>
-            </div>
-          </div>
-
-          {/* Room Selector */}
-          <div style={{
-            display: 'flex',
-            gap: '10px',
-            marginBottom: '15px',
-            flexWrap: 'wrap'
-          }}>
-            {ROOMS.map(room => {
-              const hasAccess = hasAccessToRoom(room);
-              return (
-                <button
-                  key={room.id}
-                  onClick={() => hasAccess ? switchRoom(room.id) : setShowUpgradeModal(true)}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: currentRoom === room.id ? room.color : '#fff',
-                    color: currentRoom === room.id ? '#fff' : hasAccess ? '#333' : '#999',
-                    border: `2px solid ${room.color}`,
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: 'bold',
-                    cursor: hasAccess ? 'pointer' : 'not-allowed',
-                    transition: 'all 0.2s',
-                    minWidth: '120px',
-                    opacity: hasAccess ? 1 : 0.5,
-                    position: 'relative'
-                  }}
-                >
-                  {room.name} {!hasAccess && '🔒'}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Messages */}
-          <div style={{
-            border: `2px solid ${currentRoomInfo.color}`,
-            height: '450px',
-            overflowY: 'auto',
-            marginBottom: '15px',
-            padding: '15px',
-            backgroundColor: '#f5f5f5',
-            borderRadius: '12px',
-            boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)'
-          }}>
-            {messages.length === 0 && (
-              <div style={{
-                textAlign: 'center',
-                color: '#999',
-                marginTop: '150px',
-                fontSize: '16px'
-              }}>
-                No messages in {currentRoomInfo.name} yet. Start the conversation! 💬
-              </div>
-            )}
-            {messages.map((msg, i) => (
-              <div key={i} style={{ marginBottom: '15px' }}>
-                {msg.type === 'text' ? (
-                  <MessageCard
-                    msg={msg}
-                    currentUsername={username}
-                    formatTime={formatTime}
-                    currentRoomColor={currentRoomInfo.color}
-                    getAvatar={getAvatar}
-                    onEdit={handleEditMessage}
-                    onDelete={handleDeleteMessage}
-                    onReact={handleReaction}
-                    showReactionPicker={showReactionPicker}
-                    setShowReactionPicker={setShowReactionPicker}
-                  />
-                ) : (
-                  <SignalCard
-                    signal={msg.signal}
-                    username={msg.username}
-                    timestamp={msg.timestamp}
-                    formatTime={formatTime}
-                    getAvatar={getAvatar}
-                    reactions={msg.reactions}
-                    currentUsername={username}
-                    onReact={handleReaction}
-                    messageId={msg.id}
-                    showReactionPicker={showReactionPicker}
-                    setShowReactionPicker={setShowReactionPicker}
-                  />
-                )}
-              </div>
-            ))}
-            
-            {/* Typing Indicator */}
-            {typingUsers.length > 0 && (
-              <div style={{
-                padding: '10px',
-                color: '#666',
-                fontSize: '14px',
-                fontStyle: 'italic'
-              }}>
-                {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-              </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Signal Form */}
-          {showSignalForm && (
-            <div style={{
-              border: '2px solid #2196F3',
-              borderRadius: '12px',
-              padding: '20px',
-              marginBottom: '15px',
-              backgroundColor: '#E3F2FD',
-              boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
-            }}>
-              <h3 style={{ marginTop: 0, color: '#1976D2' }}>📊 Post Trading Signal</h3>
-
-              <input
-                placeholder="Pair (e.g. XAUUSD, BTCUSDT)"
-                value={signalData.pair}
-                onChange={(e) => setSignalData({ ...signalData, pair: e.target.value.toUpperCase() })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  marginBottom: '10px',
-                  border: '2px solid #ddd',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-
-              <select
-                value={signalData.direction}
-                onChange={(e) => setSignalData({ ...signalData, direction: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  marginBottom: '10px',
-                  border: '2px solid #ddd',
-                  borderRadius: '6px',
-                  fontSize: '14px'
-                }}
-              >
-                <option value="BUY">BUY (Long)</option>
-                <option value="SELL">SELL (Short)</option>
-              </select>
-
-              <input
-                placeholder="Entry Price"
-                type="number"
-                step="0.01"
-                value={signalData.entry}
-                onChange={(e) => setSignalData({ ...signalData, entry: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  marginBottom: '10px',
-                  border: '2px solid #ddd',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-
-              <input
-                placeholder="Stop Loss"
-                type="number"
-                step="0.01"
-                value={signalData.stopLoss}
-                onChange={(e) => setSignalData({ ...signalData, stopLoss: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  marginBottom: '10px',
-                  border: '2px solid #ddd',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-
-              <input
-                placeholder="Take Profit"
-                type="number"
-                step="0.01"
-                value={signalData.takeProfit}
-                onChange={(e) => setSignalData({ ...signalData, takeProfit: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  marginBottom: '12px',
-                  border: '2px solid #ddd',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-
-              <p style={{
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '20px',
+        padding: '15px',
+        backgroundColor: '#fff',
+        borderRadius: '12px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+      }}>
+        <div>
+          <h2 style={{ margin: 0, color: '#333' }}>Trader Chat</h2>
+          <p style={{ margin: '5px 0 0 0', color: '#666', fontSize: '14px' }}>
+            <strong>{username}</strong> · {userTier === 'free' ? '🆓 Free' : userTier === 'pro' ? '💎 Pro' : '👑 Premium'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {/* NEW: Create Private Room Button (Premium only) */}
+          {canCreatePrivateRoom() && (
+            <button
+              onClick={() => setShowPrivateRoomModal(true)}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#673AB7',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
                 fontWeight: 'bold',
-                color: '#4CAF50',
-                fontSize: '18px',
-                marginBottom: '15px'
-              }}>
-                Risk:Reward Ratio: {calculateRR()}
-              </p>
-
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={sendSignal}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '8px',
-                    fontSize: '16px',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Post Signal
-                </button>
-
-                <button
-                  onClick={() => setShowSignalForm(false)}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#f44336',
-                    color: 'white',
-                    border: 'none',
-                    cursor: 'pointer',
-                    borderRadius: '8px',
-                    fontSize: '16px',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Message Input */}
-          <div style={{
-            display: 'flex',
-            gap: '10px',
-            marginBottom: '10px'
-          }}>
-            <input
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                handleTyping();
+                fontSize: '14px'
               }}
-              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder={editingMessage ? 'Edit your message...' : `Message ${currentRoomInfo.name}...`}
+            >
+              ➕ New Room
+            </button>
+          )}
+          <button
+            onClick={() => window.location.href = '/account'}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#2196F3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+          >
+            👤 Account
+          </button>
+          <button
+            onClick={() => setShowUpgradeModal(true)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: userTier === 'premium' ? '#ccc' : '#FF9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: userTier === 'premium' ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+            disabled={userTier === 'premium'}
+          >
+            {userTier === 'premium' ? '✓ Premium' : '⬆️ Upgrade'}
+          </button>
+        </div>
+      </div>
+
+      {/* Room Selector */}
+      <div style={{
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '15px',
+        flexWrap: 'wrap'
+      }}>
+        {allRooms.map(room => {
+          const hasAccess = room.isPrivate ? true : hasAccessToRoom(room);
+          return (
+            <button
+              key={room.id}
+              onClick={() => hasAccess ? switchRoom(room.id) : setShowUpgradeModal(true)}
               style={{
                 flex: 1,
                 padding: '12px',
-                border: `2px solid ${editingMessage ? '#FF9800' : currentRoomInfo.color}`,
+                backgroundColor: currentRoom === room.id ? room.color : '#fff',
+                color: currentRoom === room.id ? '#fff' : hasAccess ? '#333' : '#999',
+                border: `2px solid ${room.color}`,
                 borderRadius: '8px',
-                fontSize: '15px'
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: hasAccess ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s',
+                minWidth: '120px',
+                opacity: hasAccess ? 1 : 0.5,
+                position: 'relative'
               }}
-            />
-            {editingMessage && (
-              <button
-                onClick={() => {
-                  setEditingMessage(null);
-                  setInput('');
-                }}
-                style={{
-                  padding: '12px 20px',
-                  backgroundColor: '#f44336',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: 'bold'
-                }}
-              >
-                Cancel
-              </button>
+            >
+              {room.name} {!hasAccess && '🔒'}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Messages */}
+      <div style={{
+        border: `2px solid ${currentRoomInfo.color}`,
+        height: '450px',
+        overflowY: 'auto',
+        marginBottom: '15px',
+        padding: '15px',
+        backgroundColor: '#f5f5f5',
+        borderRadius: '12px',
+        boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)'
+      }}>
+        {messages.length === 0 && (
+          <div style={{
+            textAlign: 'center',
+            color: '#999',
+            marginTop: '150px',
+            fontSize: '16px'
+          }}>
+            No messages in {currentRoomInfo.name} yet. Start the conversation! 💬
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} style={{ marginBottom: '15px' }}>
+            {msg.type === 'text' ? (
+              <div style={{
+                backgroundColor: msg.is_official ? '#FFF3E0' : '#fff', // NEW: Different color for official posts
+                padding: '12px',
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                border: msg.is_official ? '2px solid #FF9800' : 'none' // NEW: Border for official posts
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <strong style={{ color: currentRoomInfo.color }}>{msg.username}</strong>
+                    {/* NEW: Official post badge */}
+                    {msg.is_official && (
+                      <span style={{
+                        backgroundColor: '#FF9800',
+                        color: 'white',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: 'bold'
+                      }}>
+                        ⭐ OFFICIAL
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#999' }}>
+                    {formatTime(msg.timestamp)}
+                  </span>
+                </div>
+                <div style={{ color: '#333' }}>{msg.text}</div>
+              </div>
+            ) : (
+              <SignalCard
+                signal={msg.signal}
+                username={msg.username}
+                timestamp={msg.timestamp}
+                formatTime={formatTime}
+                isOfficial={msg.is_official} // NEW: Pass official flag
+              />
             )}
+          </div>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Signal Form */}
+      {showSignalForm && (
+        <div style={{
+          border: '2px solid #2196F3',
+          borderRadius: '12px',
+          padding: '20px',
+          marginBottom: '15px',
+          backgroundColor: '#E3F2FD',
+          boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+        }}>
+          <h3 style={{ marginTop: 0, color: '#1976D2' }}>📊 Post Trading Signal</h3>
+
+          {/* NEW: Official Post Toggle */}
+          {canCreateOfficialPost() && (
+            <div style={{
+              marginBottom: '15px',
+              padding: '10px',
+              backgroundColor: isOfficialPost ? '#FF9800' : '#fff',
+              borderRadius: '8px',
+              border: '2px solid #FF9800',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer'
+            }}
+            onClick={() => setIsOfficialPost(!isOfficialPost)}
+            >
+              <span style={{ fontWeight: 'bold', color: isOfficialPost ? '#fff' : '#333' }}>
+                ⭐ Mark as Official Post
+              </span>
+              <input
+                type="checkbox"
+                checked={isOfficialPost}
+                onChange={() => setIsOfficialPost(!isOfficialPost)}
+                style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+              />
+            </div>
+          )}
+
+          <input
+            placeholder="Pair (e.g. XAUUSD, BTCUSDT)"
+            value={signalData.pair}
+            onChange={(e) => setSignalData({ ...signalData, pair: e.target.value.toUpperCase() })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <select
+            value={signalData.direction}
+            onChange={(e) => setSignalData({ ...signalData, direction: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px'
+            }}
+          >
+            <option value="BUY">BUY (Long)</option>
+            <option value="SELL">SELL (Short)</option>
+          </select>
+
+          <input
+            placeholder="Entry Price"
+            type="number"
+            step="0.01"
+            value={signalData.entry}
+            onChange={(e) => setSignalData({ ...signalData, entry: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <input
+            placeholder="Stop Loss"
+            type="number"
+            step="0.01"
+            value={signalData.stopLoss}
+            onChange={(e) => setSignalData({ ...signalData, stopLoss: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <input
+            placeholder="Take Profit"
+            type="number"
+            step="0.01"
+            value={signalData.takeProfit}
+            onChange={(e) => setSignalData({ ...signalData, takeProfit: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '12px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <p style={{
+            fontWeight: 'bold',
+            color: '#4CAF50',
+            fontSize: '18px',
+            marginBottom: '15px'
+          }}>
+            Risk:Reward Ratio: {calculateRR()}
+          </p>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
             <button
-              onClick={sendMessage}
+              onClick={sendSignal}
               style={{
-                padding: '12px 24px',
-                backgroundColor: editingMessage ? '#FF9800' : currentRoomInfo.color,
+                flex: 1,
+                padding: '12px',
+                backgroundColor: '#4CAF50',
                 color: 'white',
                 border: 'none',
                 cursor: 'pointer',
@@ -733,94 +643,110 @@ function Chat() {
                 fontWeight: 'bold'
               }}
             >
-              {editingMessage ? 'Update' : 'Send'}
+              Post Signal
+            </button>
+
+            <button
+              onClick={() => setShowSignalForm(false)}
+              style={{
+                flex: 1,
+                padding: '12px',
+                backgroundColor: '#f44336',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
+                borderRadius: '8px',
+                fontSize: '16px',
+                fontWeight: 'bold'
+              }}
+            >
+              Cancel
             </button>
           </div>
-
-          {/* Post Signal Button */}
-          <button
-            onClick={() => setShowSignalForm(!showSignalForm)}
-            style={{
-              width: '100%',
-              padding: '14px',
-              backgroundColor: '#FF9800',
-              color: 'white',
-              border: 'none',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              borderRadius: '8px',
-              boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
-            }}
-          >
-            📊 {showSignalForm ? 'Hide Signal Form' : 'Post Trading Signal'}
-          </button>
         </div>
+      )}
 
-        {/* Online Users Sidebar */}
-        <div style={{ width: '250px' }}>
-          <div style={{
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            padding: '20px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            position: 'sticky',
-            top: '20px'
-          }}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#333', fontSize: '18px' }}>
-              🟢 Online Users ({onlineUsers.length})
-            </h3>
-            <div style={{ maxHeight: '600px', overflowY: 'auto' }}>
-              {onlineUsers.map((user, i) => (
-                <div key={i} style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '10px',
-                  backgroundColor: user === username ? '#E3F2FD' : '#f5f5f5',
-                  borderRadius: '8px',
-                  marginBottom: '8px'
-                }}>
-                  <img 
-                    src={getAvatar(user)} 
-                    alt={user}
-                    style={{ 
-                      width: '32px', 
-                      height: '32px', 
-                      borderRadius: '50%'
-                    }}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ 
-                      fontWeight: 'bold', 
-                      fontSize: '14px',
-                      color: user === username ? '#2196F3' : '#333'
-                    }}>
-                      {user} {user === username && '(You)'}
-                    </div>
-                  </div>
-                  <div style={{
-                    width: '8px',
-                    height: '8px',
-                    backgroundColor: '#4CAF50',
-                    borderRadius: '50%'
-                  }} />
-                </div>
-              ))}
-              {onlineUsers.length === 0 && (
-                <div style={{ 
-                  textAlign: 'center', 
-                  color: '#999', 
-                  padding: '20px',
-                  fontSize: '14px'
-                }}>
-                  No users online
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* Message Input */}
+      <div style={{
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '10px'
+      }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          placeholder={`Message ${currentRoomInfo.name}...`}
+          style={{
+            flex: 1,
+            padding: '12px',
+            border: `2px solid ${currentRoomInfo.color}`,
+            borderRadius: '8px',
+            fontSize: '15px'
+          }}
+        />
+        <button
+          onClick={sendMessage}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: currentRoomInfo.color,
+            color: 'white',
+            border: 'none',
+            cursor: 'pointer',
+            borderRadius: '8px',
+            fontSize: '16px',
+            fontWeight: 'bold'
+          }}
+        >
+          Send
+        </button>
       </div>
+
+      {/* NEW: Official Post Checkbox for Text Messages */}
+      {canCreateOfficialPost() && (
+        <div style={{
+          marginBottom: '10px',
+          padding: '8px',
+          backgroundColor: isOfficialPost ? '#FF9800' : '#fff',
+          borderRadius: '8px',
+          border: '2px solid #FF9800',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          cursor: 'pointer'
+        }}
+        onClick={() => setIsOfficialPost(!isOfficialPost)}
+        >
+          <input
+            type="checkbox"
+            checked={isOfficialPost}
+            onChange={() => setIsOfficialPost(!isOfficialPost)}
+            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+          />
+          <span style={{ fontWeight: 'bold', color: isOfficialPost ? '#fff' : '#333', fontSize: '14px' }}>
+            ⭐ Post as Official Message
+          </span>
+        </div>
+      )}
+
+      {/* Post Signal Button */}
+      <button
+        onClick={() => setShowSignalForm(!showSignalForm)}
+        style={{
+          width: '100%',
+          padding: '14px',
+          backgroundColor: '#FF9800',
+          color: 'white',
+          border: 'none',
+          fontSize: '16px',
+          fontWeight: 'bold',
+          cursor: 'pointer',
+          borderRadius: '8px',
+          boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
+        }}
+      >
+        📊 {showSignalForm ? 'Hide Signal Form' : 'Post Trading Signal'}
+      </button>
 
       {/* Upgrade Modal */}
       {showUpgradeModal && (
@@ -831,160 +757,105 @@ function Chat() {
           suggestedTier={selectedUpgradeTier}
         />
       )}
-    </div>
-  );
-}
 
-// Message Card Component
-function MessageCard({ 
-  msg, 
-  currentUsername, 
-  formatTime, 
-  currentRoomColor, 
-  getAvatar,
-  onEdit,
-  onDelete,
-  onReact,
-  showReactionPicker,
-  setShowReactionPicker
-}) {
-  const isOwnMessage = msg.username === currentUsername;
-  
-  return (
-    <div style={{
-      backgroundColor: '#fff',
-      padding: '12px',
-      borderRadius: '8px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-      position: 'relative'
-    }}>
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
-        <img 
-          src={getAvatar(msg.username)} 
-          alt={msg.username}
-          style={{ 
-            width: '40px', 
-            height: '40px', 
-            borderRadius: '50%',
-            flexShrink: 0
-          }}
-        />
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
-            <strong style={{ color: currentRoomColor }}>{msg.username}</strong>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', color: '#999' }}>
-                {formatTime(msg.timestamp)}
-                {msg.edited && <span style={{ marginLeft: '5px', fontStyle: 'italic' }}>(edited)</span>}
-              </span>
-              {isOwnMessage && (
-                <>
-                  <button
-                    onClick={() => onEdit(msg)}
-                    style={{
-                      padding: '4px 8px',
-                      backgroundColor: '#2196F3',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => onDelete(msg.id)}
-                    style={{
-                      padding: '4px 8px',
-                      backgroundColor: '#f44336',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                  >
-                    🗑️
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-          <div style={{ color: '#333', marginBottom: '8px' }}>{msg.text}</div>
-          
-          {/* Reactions */}
-          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
-            {msg.reactions && Object.entries(msg.reactions).map(([emoji, users]) => (
+      {/* NEW: Create Private Room Modal */}
+      {showPrivateRoomModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '500px',
+            width: '90%'
+          }}>
+            <h2 style={{ marginTop: 0 }}>🔒 Create Private Room</h2>
+            <p style={{ color: '#666', marginBottom: '20px' }}>
+              Premium feature - Create your own private trading room
+            </p>
+
+            <input
+              placeholder="Room Name"
+              value={newRoomData.name}
+              onChange={(e) => setNewRoomData({ ...newRoomData, name: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '12px',
+                marginBottom: '12px',
+                border: '2px solid #ddd',
+                borderRadius: '8px',
+                fontSize: '16px',
+                boxSizing: 'border-box'
+              }}
+            />
+
+            <textarea
+              placeholder="Description (optional)"
+              value={newRoomData.description}
+              onChange={(e) => setNewRoomData({ ...newRoomData, description: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '12px',
+                marginBottom: '20px',
+                border: '2px solid #ddd',
+                borderRadius: '8px',
+                fontSize: '16px',
+                boxSizing: 'border-box',
+                minHeight: '80px',
+                resize: 'vertical'
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: '10px' }}>
               <button
-                key={emoji}
-                onClick={() => onReact(msg.id, emoji)}
+                onClick={createPrivateRoom}
                 style={{
-                  padding: '4px 8px',
-                  backgroundColor: users.includes(currentUsername) ? '#E3F2FD' : '#f5f5f5',
-                  border: users.includes(currentUsername) ? '2px solid #2196F3' : '1px solid #ddd',
-                  borderRadius: '12px',
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: '#673AB7',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
                   cursor: 'pointer',
-                  fontSize: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
+                  fontWeight: 'bold',
+                  fontSize: '16px'
                 }}
               >
-                {emoji} {users.length}
+                Create Room
               </button>
-            ))}
-            <button
-              onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)}
-              style={{
-                padding: '4px 8px',
-                backgroundColor: '#f5f5f5',
-                border: '1px solid #ddd',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              ➕
-            </button>
-          </div>
-          
-          {/* Reaction Picker */}
-          {showReactionPicker === msg.id && (
-            <div style={{
-              position: 'absolute',
-              bottom: '-50px',
-              right: '10px',
-              backgroundColor: '#fff',
-              padding: '8px',
-              borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-              display: 'flex',
-              gap: '5px',
-              zIndex: 100
-            }}>
-              {REACTIONS.map(emoji => (
-                <button
-                  key={emoji}
-                  onClick={() => onReact(msg.id, emoji)}
-                  style={{
-                    padding: '5px',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '20px',
-                    borderRadius: '4px'
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                >
-                  {emoji}
-                </button>
-              ))}
+              <button
+                onClick={() => {
+                  setShowPrivateRoomModal(false);
+                  setNewRoomData({ name: '', description: '' });
+                }}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: '#f0f0f0',
+                  color: '#333',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px'
+                }}
+              >
+                Cancel
+              </button>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1072,6 +943,19 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
                   </ul>
                 </div>
 
+                {/* NEW: Show official post feature */}
+                {tier !== 'free' && (
+                  <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
+                    ⭐ Create Official Posts
+                  </div>
+                )}
+
+                {tier === 'premium' && (
+                  <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                    🔒 Create Private Rooms
+                  </div>
+                )}
+
                 {!isCurrent && tier !== 'free' && (
                   <button
                     onClick={() => {
@@ -1136,20 +1020,8 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
   );
 }
 
-// Signal Card Component
-function SignalCard({ 
-  signal, 
-  username, 
-  timestamp, 
-  formatTime, 
-  getAvatar,
-  reactions,
-  currentUsername,
-  onReact,
-  messageId,
-  showReactionPicker,
-  setShowReactionPicker
-}) {
+// Signal Card Component (Updated)
+function SignalCard({ signal, username, timestamp, formatTime, isOfficial }) {
   const isBuy = signal.direction === 'BUY';
 
   return (
@@ -1157,134 +1029,66 @@ function SignalCard({
       border: `3px solid ${isBuy ? '#4CAF50' : '#f44336'}`,
       borderRadius: '12px',
       padding: '18px',
-      backgroundColor: isBuy ? '#E8F5E9' : '#FFEBEE',
-      boxShadow: '0 4px 8px rgba(0,0,0,0.15)',
-      position: 'relative'
+      backgroundColor: isOfficial 
+        ? (isBuy ? '#E8F5E9' : '#FFEBEE') 
+        : (isBuy ? '#F1F8E9' : '#FCE4EC'), // NEW: Lighter color for non-official
+      boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
     }}>
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <img 
-          src={getAvatar(username)} 
-          alt={username}
-          style={{ 
-            width: '40px', 
-            height: '40px', 
-            borderRadius: '50%',
-            flexShrink: 0
-          }}
-        />
-        <div style={{ flex: 1 }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '12px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '12px'
+            fontSize: '22px',
+            fontWeight: 'bold',
+            color: isBuy ? '#2E7D32' : '#C62828'
           }}>
-            <div style={{
-              fontSize: '22px',
-              fontWeight: 'bold',
-              color: isBuy ? '#2E7D32' : '#C62828'
+            {signal.direction} {signal.pair}
+          </div>
+          {/* NEW: Official badge for signals */}
+          {isOfficial && (
+            <span style={{
+              backgroundColor: '#FF9800',
+              color: 'white',
+              padding: '4px 10px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 'bold'
             }}>
-              {signal.direction} {signal.pair}
-            </div>
-            <span style={{ fontSize: '12px', color: '#666' }}>
-              {formatTime(timestamp)}
+              ⭐ OFFICIAL
             </span>
-          </div>
-
-          <div style={{ fontSize: '15px', lineHeight: '1.8', marginBottom: '12px' }}>
-            <div><strong>Entry:</strong> {signal.entry}</div>
-            <div><strong>Stop Loss:</strong> {signal.stopLoss}</div>
-            <div><strong>Take Profit:</strong> {signal.takeProfit}</div>
-            <div style={{
-              fontWeight: 'bold',
-              color: '#4CAF50',
-              fontSize: '18px',
-              marginTop: '8px'
-            }}>
-              R:R {signal.riskReward}
-            </div>
-          </div>
-
-          {/* Reactions */}
-          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
-            {reactions && Object.entries(reactions).map(([emoji, users]) => (
-              <button
-                key={emoji}
-                onClick={() => onReact(messageId, emoji)}
-                style={{
-                  padding: '4px 8px',
-                  backgroundColor: users.includes(currentUsername) ? '#E3F2FD' : '#f5f5f5',
-                  border: users.includes(currentUsername) ? '2px solid #2196F3' : '1px solid #ddd',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}
-              >
-                {emoji} {users.length}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowReactionPicker(showReactionPicker === messageId ? null : messageId)}
-              style={{
-                padding: '4px 8px',
-                backgroundColor: '#f5f5f5',
-                border: '1px solid #ddd',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              ➕
-            </button>
-          </div>
-
-          {/* Reaction Picker */}
-          {showReactionPicker === messageId && (
-            <div style={{
-              position: 'absolute',
-              bottom: '-50px',
-              right: '10px',
-              backgroundColor: '#fff',
-              padding: '8px',
-              borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-              display: 'flex',
-              gap: '5px',
-              zIndex: 100
-            }}>
-              {REACTIONS.map(emoji => (
-                <button
-                  key={emoji}
-                  onClick={() => onReact(messageId, emoji)}
-                  style={{
-                    padding: '5px',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '20px',
-                    borderRadius: '4px'
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
           )}
-
-          <div style={{
-            fontSize: '13px',
-            color: '#666',
-            borderTop: '1px solid #ccc',
-            paddingTop: '10px'
-          }}>
-            Posted by <strong>{username}</strong>
-          </div>
         </div>
+        <span style={{ fontSize: '12px', color: '#666' }}>
+          {formatTime(timestamp)}
+        </span>
+      </div>
+
+      <div style={{ fontSize: '15px', lineHeight: '1.8' }}>
+        <div><strong>Entry:</strong> {signal.entry}</div>
+        <div><strong>Stop Loss:</strong> {signal.stopLoss}</div>
+        <div><strong>Take Profit:</strong> {signal.takeProfit}</div>
+        <div style={{
+          fontWeight: 'bold',
+          color: '#4CAF50',
+          fontSize: '18px',
+          marginTop: '8px'
+        }}>
+          R:R {signal.riskReward}
+        </div>
+      </div>
+
+      <div style={{
+        fontSize: '13px',
+        color: '#666',
+        marginTop: '12px',
+        borderTop: '1px solid #ccc',
+        paddingTop: '10px'
+      }}>
+        Posted by <strong>{username}</strong>
       </div>
     </div>
   );
