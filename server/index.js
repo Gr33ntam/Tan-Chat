@@ -9,8 +9,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://tan-chat-gamma.vercel.app",
-    /^https:\/\/tan-chat-.*\.vercel\.app$/  // ✅ Allows ALL Vercel preview URLs
+    "https://tan-chat-gamma.vercel.app"
   ],
   credentials: true
 }));
@@ -20,18 +19,17 @@ const io = socketIo(server, {
   cors: {
     origin: [
       "http://localhost:3000",
-      "https://tan-chat-gamma.vercel.app",
-      /^https:\/\/tan-chat-.*\.vercel\.app$/  // ✅ Allows ALL Vercel preview URLs
+      "https://tan-chat-gamma.vercel.app"
     ],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
 
-// Initialize Supabase with SERVICE ROLE KEY
+// Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY  // Use existing variable
+  process.env.SUPABASE_ANON_KEY
 );
 
 // Room access levels
@@ -39,22 +37,6 @@ const ROOM_ACCESS = {
   free: ['general'],
   pro: ['general', 'forex', 'crypto'],
   premium: ['general', 'forex', 'crypto', 'stocks']
-};
-
-// Track online users per room
-const onlineUsers = {
-  general: new Set(),
-  forex: new Set(),
-  crypto: new Set(),
-  stocks: new Set()
-};
-
-// Track typing users per room
-const typingUsers = {
-  general: new Set(),
-  forex: new Set(),
-  crypto: new Set(),
-  stocks: new Set()
 };
 
 // Helper: Get or create user
@@ -66,23 +48,23 @@ async function getOrCreateUser(username) {
       .select('*')
       .eq('username', username)
       .single();
-
+    
     if (existingUser) {
       return existingUser;
     }
-
+    
     // Create new user with free tier
     const { data: newUser, error: createError } = await supabase
       .from('users')
       .insert([{ username, subscription_tier: 'free' }])
       .select()
       .single();
-
+    
     if (createError) {
       console.error('Error creating user:', createError);
       return null;
     }
-
+    
     return newUser;
   } catch (err) {
     console.error('Error in getOrCreateUser:', err);
@@ -95,19 +77,53 @@ function hasRoomAccess(tier, room) {
   return ROOM_ACCESS[tier]?.includes(room) || false;
 }
 
-// Helper: Broadcast online users for a room
-function broadcastOnlineUsers(room) {
-  const users = Array.from(onlineUsers[room]);
-  io.to(room).emit('online_users', users);
-  console.log(`Broadcasting online users for ${room}:`, users);
+// Helper: Check if user can create official posts (Pro or Premium)
+function canCreateOfficialPost(tier) {
+  return tier === 'pro' || tier === 'premium';
+}
+
+// Helper: Check if user can create private rooms (Premium only)
+function canCreatePrivateRoom(tier) {
+  return tier === 'premium';
+}
+
+// Helper: Check if room is private
+async function isPrivateRoom(roomId) {
+  const { data } = await supabase
+    .from('private_rooms')
+    .select('id')
+    .eq('room_id', roomId)
+    .single();
+  return !!data;
+}
+
+// Helper: Check if user has access to private room
+async function hasPrivateRoomAccess(username, roomId) {
+  const { data } = await supabase
+    .from('room_members')
+    .select('*')
+    .eq('room_id', roomId)
+    .eq('username', username)
+    .single();
+  return !!data;
+}
+
+// Helper: Get user role in private room
+async function getUserRoleInRoom(username, roomId) {
+  const { data } = await supabase
+    .from('room_members')
+    .select('role')
+    .eq('room_id', roomId)
+    .eq('username', username)
+    .single();
+  return data?.role || null;
 }
 
 io.on('connection', async (socket) => {
   console.log('User connected:', socket.id);
-
+  
   let currentUser = null;
-  let currentRoom = null;
-
+  
   // Register user
   socket.on('register_user', async (username) => {
     currentUser = await getOrCreateUser(username);
@@ -121,46 +137,54 @@ io.on('connection', async (socket) => {
       socket.emit('registration_error', 'Failed to register user');
     }
   });
-
+  
   // Join a specific room
   socket.on('join_room', async ({ room, username }) => {
     // Get user data
     const user = await getOrCreateUser(username);
-
+    
     if (!user) {
       socket.emit('room_error', { message: 'User not found' });
       return;
     }
-
-    // Check if user has access to this room
-    if (!hasRoomAccess(user.subscription_tier, room)) {
-      socket.emit('room_locked', {
-        room,
-        requiredTier: room === 'stocks' ? 'premium' : 'pro',
-        message: `Upgrade to ${room === 'stocks' ? 'Premium' : 'Pro'} to access ${room} room`
-      });
-      console.log(`Access denied: ${username} tried to join ${room} with ${user.subscription_tier} tier`);
-      return;
+    
+    // Check if it's a private room
+    const isPrivate = await isPrivateRoom(room);
+    
+    if (isPrivate) {
+      // Check private room access
+      const hasAccess = await hasPrivateRoomAccess(username, room);
+      if (!hasAccess) {
+        socket.emit('room_locked', { 
+          room, 
+          requiredTier: 'premium',
+          message: 'You need to be invited to this private room'
+        });
+        return;
+      }
+    } else {
+      // Check public room access
+      if (!hasRoomAccess(user.subscription_tier, room)) {
+        socket.emit('room_locked', { 
+          room, 
+          requiredTier: room === 'stocks' ? 'premium' : 'pro',
+          message: `Upgrade to ${room === 'stocks' ? 'Premium' : 'Pro'} to access ${room} room`
+        });
+        console.log(`Access denied: ${username} tried to join ${room} with ${user.subscription_tier} tier`);
+        return;
+      }
     }
-
-    // Remove user from previous room
-    if (currentRoom) {
-      socket.leave(currentRoom);
-      onlineUsers[currentRoom].delete(username);
-      typingUsers[currentRoom].delete(username);
-      broadcastOnlineUsers(currentRoom);
-      io.to(currentRoom).emit('user_stop_typing', { username, room: currentRoom });
-    }
-
+    
+    // Leave all previous rooms
+    const rooms = Array.from(socket.rooms);
+    rooms.forEach(r => {
+      if (r !== socket.id) socket.leave(r);
+    });
+    
     // Join the new room
     socket.join(room);
-    currentRoom = room;
-    onlineUsers[room].add(username);
     console.log(`User ${socket.id} (${username}) joined room: ${room}`);
-
-    // Broadcast updated online users
-    broadcastOnlineUsers(room);
-
+    
     // Load messages for this room
     try {
       const { data: messages, error } = await supabase
@@ -168,7 +192,7 @@ io.on('connection', async (socket) => {
         .select('*')
         .eq('room', room)
         .order('created_at', { ascending: true });
-
+      
       if (error) {
         console.error('Error loading messages:', error);
       } else {
@@ -178,297 +202,272 @@ io.on('connection', async (socket) => {
       console.error('Database error:', err);
     }
   });
-
-  // Listen for new messages
+  
+  // Send message (updated to support official posts)
   socket.on('send_message', async (data) => {
     try {
       // Verify user has access to the room
       const user = await getOrCreateUser(data.username);
-      if (!user || !hasRoomAccess(user.subscription_tier, data.room)) {
-        socket.emit('message_error', 'No access to this room');
+      if (!user) {
+        socket.emit('message_error', 'User not found');
         return;
       }
 
-      // Initialize reactions as empty object
-      const messageData = {
-        ...data,
-        reactions: {}
-      };
+      // Check room access
+      const isPrivate = await isPrivateRoom(data.room);
+      if (isPrivate) {
+        const hasAccess = await hasPrivateRoomAccess(data.username, data.room);
+        if (!hasAccess) {
+          socket.emit('message_error', 'No access to this room');
+          return;
+        }
+      } else {
+        if (!hasRoomAccess(user.subscription_tier, data.room)) {
+          socket.emit('message_error', 'No access to this room');
+          return;
+        }
+      }
 
+      // Check if trying to create official post
+      if (data.is_official && !canCreateOfficialPost(user.subscription_tier)) {
+        socket.emit('message_error', 'Only Pro and Premium users can create official posts');
+        return;
+      }
+      
       // Save to database
       const { data: newMessage, error } = await supabase
         .from('messages')
-        .insert([messageData])
+        .insert([data])
         .select()
         .single();
-
+      
       if (error) {
         console.error('Error saving message:', error);
         return;
       }
 
+      // If it's an official post, create metadata
+      if (data.is_official && data.type === 'signal') {
+        await supabase
+          .from('official_posts_metadata')
+          .insert([{
+            message_id: newMessage.id,
+            author_username: data.username,
+            post_type: 'signal',
+            status: 'active',
+            outcome: 'pending'
+          }]);
+      }
+      
       // Broadcast ONLY to users in the same room
       io.to(data.room).emit('new_message', newMessage);
       console.log(`Message saved and broadcast to room ${data.room}:`, newMessage.id);
-
+      
     } catch (err) {
       console.error('Error processing message:', err);
     }
   });
 
-  // Edit message
-  socket.on('edit_message', async ({ messageId, newText, username }) => {
+  // Create private room (Premium only)
+  socket.on('create_private_room', async ({ username, roomName, description }) => {
     try {
-      // Verify the message belongs to the user
-      const { data: message, error: fetchError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('id', messageId)
-        .single();
-
-      if (fetchError || !message) {
-        socket.emit('edit_error', 'Message not found');
+      const user = await getOrCreateUser(username);
+      
+      if (!user) {
+        socket.emit('room_error', { message: 'User not found' });
         return;
       }
 
-      if (message.username !== username) {
-        socket.emit('edit_error', 'You can only edit your own messages');
+      if (!canCreatePrivateRoom(user.subscription_tier)) {
+        socket.emit('room_error', { message: 'Only Premium users can create private rooms' });
         return;
       }
 
-      // Update the message
-      const { data: updatedMessage, error: updateError } = await supabase
-        .from('messages')
-        .update({
-          text: newText,
-          edited: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', messageId)
+      // Generate unique room ID
+      const roomId = `private_${username}_${Date.now()}`;
+
+      // Create room
+      const { data: newRoom, error: roomError } = await supabase
+        .from('private_rooms')
+        .insert([{
+          room_id: roomId,
+          name: roomName,
+          description: description,
+          owner_username: username
+        }])
         .select()
         .single();
 
-      if (updateError) {
-        console.error('Error updating message:', updateError);
-        socket.emit('edit_error', 'Failed to update message');
+      if (roomError) {
+        console.error('Error creating room:', roomError);
+        socket.emit('room_error', { message: 'Failed to create room' });
         return;
       }
 
-      // Broadcast the updated message to the room
-      io.to(message.room).emit('message_updated', updatedMessage);
-      console.log(`Message ${messageId} edited by ${username}`);
+      // Add owner as member
+      await supabase
+        .from('room_members')
+        .insert([{
+          room_id: roomId,
+          username: username,
+          role: 'owner'
+        }]);
+
+      socket.emit('room_created', {
+        room: newRoom,
+        message: 'Private room created successfully'
+      });
+
+      console.log(`Private room created: ${roomId} by ${username}`);
 
     } catch (err) {
-      console.error('Error editing message:', err);
-      socket.emit('edit_error', 'Failed to update message');
+      console.error('Error creating private room:', err);
+      socket.emit('room_error', { message: 'Failed to create room' });
     }
   });
 
-  // Delete message (user deletes own OR admin deletes any)
-  socket.on('delete_message', async ({ messageId, username }) => {
+  // Invite user to private room
+  socket.on('invite_to_room', async ({ roomId, inviterUsername, inviteeUsername }) => {
     try {
-      // 1) Fetch message first so we know the room + confirm it exists
-      const { data: message, error: fetchError } = await supabase
-        .from('messages')
-        .select('id, room, username')
-        .eq('id', messageId)
-        .single();
-
-      if (fetchError || !message) {
-        console.error('delete_message: message not found', fetchError);
-        socket.emit('delete_error', 'Message not found');
+      // Check if inviter has permission (owner or moderator)
+      const inviterRole = await getUserRoleInRoom(inviterUsername, roomId);
+      
+      if (!inviterRole || (inviterRole !== 'owner' && inviterRole !== 'moderator')) {
+        socket.emit('room_error', { message: 'You do not have permission to invite users' });
         return;
       }
 
-      // 2) Allow admin OR the message owner
-      const isAdmin = username === 'admin';
-      if (!isAdmin && message.username !== username) {
-        socket.emit('delete_error', 'Not allowed');
+      // Check if invitee already in room
+      const existingMember = await hasPrivateRoomAccess(inviteeUsername, roomId);
+      if (existingMember) {
+        socket.emit('room_error', { message: 'User is already a member' });
         return;
       }
 
-      // 3) Delete from database
-      const { error: deleteError } = await supabase
-        .from('messages')
+      // Add member
+      await supabase
+        .from('room_members')
+        .insert([{
+          room_id: roomId,
+          username: inviteeUsername,
+          role: 'member'
+        }]);
+
+      socket.emit('invite_success', {
+        roomId,
+        username: inviteeUsername,
+        message: `${inviteeUsername} has been invited to the room`
+      });
+
+      console.log(`${inviteeUsername} invited to room ${roomId} by ${inviterUsername}`);
+
+    } catch (err) {
+      console.error('Error inviting user:', err);
+      socket.emit('room_error', { message: 'Failed to invite user' });
+    }
+  });
+
+  // Remove user from private room
+  socket.on('remove_from_room', async ({ roomId, removerUsername, removeUsername }) => {
+    try {
+      // Check if remover has permission (owner or moderator)
+      const removerRole = await getUserRoleInRoom(removerUsername, roomId);
+      
+      if (!removerRole || (removerRole !== 'owner' && removerRole !== 'moderator')) {
+        socket.emit('room_error', { message: 'You do not have permission to remove users' });
+        return;
+      }
+
+      // Cannot remove owner
+      const removeRole = await getUserRoleInRoom(removeUsername, roomId);
+      if (removeRole === 'owner') {
+        socket.emit('room_error', { message: 'Cannot remove room owner' });
+        return;
+      }
+
+      // Remove member
+      await supabase
+        .from('room_members')
         .delete()
-        .eq('id', messageId);
+        .eq('room_id', roomId)
+        .eq('username', removeUsername);
 
-      if (deleteError) {
-        console.error('delete_message: deleteError', deleteError);
-        socket.emit('delete_error', 'Failed to delete message');
-        return;
-      }
+      socket.emit('remove_success', {
+        roomId,
+        username: removeUsername,
+        message: `${removeUsername} has been removed from the room`
+      });
 
-      // ✅ 4) Broadcast to everyone in that room (emit object with messageId)
-      io.to(message.room).emit('message_deleted', { messageId: messageId });
+      console.log(`${removeUsername} removed from room ${roomId} by ${removerUsername}`);
 
-      console.log(`Message ${messageId} deleted by ${username} from room ${message.room}`);
     } catch (err) {
-      console.error('delete_message: exception', err);
-      socket.emit('delete_error', 'Failed to delete message');
+      console.error('Error removing user:', err);
+      socket.emit('room_error', { message: 'Failed to remove user' });
     }
   });
 
-  // ✅ FIXED: Add reaction to message (was accidentally DELETING messages!)
-  socket.on('add_reaction', async ({ messageId, username, emoji, room }) => {
+  // Get user's private rooms
+  socket.on('get_my_rooms', async ({ username }) => {
     try {
-      // Get the message
-      const { data: message, error: fetchError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('id', messageId)
-        .single();
+      const { data: rooms, error } = await supabase
+        .from('room_members')
+        .select('room_id, role, private_rooms(room_id, name, description, owner_username)')
+        .eq('username', username);
 
-      if (fetchError || !message) {
-        console.error('Message not found for reaction');
+      if (error) {
+        console.error('Error fetching rooms:', error);
+        socket.emit('rooms_error', { message: 'Failed to fetch rooms' });
         return;
       }
 
-      // Get current reactions or initialize empty object
-      let reactions = message.reactions || {};
-
-      // Toggle reaction: add if not present, remove if present
-      if (reactions[emoji]) {
-        if (reactions[emoji].includes(username)) {
-          // Remove user from reaction
-          reactions[emoji] = reactions[emoji].filter(u => u !== username);
-          // Remove emoji if no users left
-          if (reactions[emoji].length === 0) {
-            delete reactions[emoji];
-          }
-        } else {
-          // Add user to reaction
-          reactions[emoji].push(username);
-        }
-      } else {
-        // Create new reaction
-        reactions[emoji] = [username];
-      }
-
-      // ✅ UPDATE message with new reactions (NOT delete!)
-      const { error: updateError } = await supabase
-        .from('messages')
-        .update({ reactions })
-        .eq('id', messageId);
-
-      if (updateError) {
-        console.error('Error updating reactions:', updateError);
-        return;
-      }
-
-      // Broadcast the updated reactions to the room
-      io.to(room).emit('message_reacted', { messageId, reactions });
-      console.log(`Reaction ${emoji} ${reactions[emoji]?.includes(username) ? 'added' : 'removed'} by ${username} on message ${messageId}`);
+      socket.emit('my_rooms', { rooms });
 
     } catch (err) {
-      console.error('Error adding reaction:', err);
+      console.error('Error fetching rooms:', err);
+      socket.emit('rooms_error', { message: 'Failed to fetch rooms' });
     }
   });
-
-  // Typing indicator
-  socket.on('typing', ({ username, room }) => {
-    if (!typingUsers[room]) typingUsers[room] = new Set();
-    typingUsers[room].add(username);
-    io.to(room).emit('user_typing', { username, room });
-  });
-
-  socket.on('stop_typing', ({ username, room }) => {
-    if (typingUsers[room]) {
-      typingUsers[room].delete(username);
-      io.to(room).emit('user_stop_typing', { username, room });
-    }
-  });
-
+  
   // Mock payment - upgrade user
   socket.on('upgrade_subscription', async ({ username, tier }) => {
     try {
       const { data: updatedUser, error } = await supabase
         .from('users')
-        .update({
+        .update({ 
           subscription_tier: tier,
           updated_at: new Date().toISOString()
         })
         .eq('username', username)
         .select()
         .single();
-
+      
       if (error) {
         console.error('Error upgrading user:', error);
         socket.emit('upgrade_error', 'Failed to upgrade');
         return;
       }
+      
+      socket.emit('upgrade_success', {
+        username: updatedUser.username,
+        tier: updatedUser.subscription_tier
+      });
 
-      // Emit to all sockets (for account page updates)
+      // Broadcast to all clients (for admin dashboard)
       io.emit('upgrade_success', {
         username: updatedUser.username,
         tier: updatedUser.subscription_tier
       });
-      console.log(`User upgraded: ${username} -> ${tier}`);
 
+      console.log(`User upgraded: ${username} -> ${tier}`);
+      
     } catch (err) {
       console.error('Error in upgrade:', err);
       socket.emit('upgrade_error', 'Failed to upgrade');
     }
   });
-
-  // Admin bulk delete: Delete all messages from a user in a room
-  socket.on('delete_user_messages', async ({ username, room }) => {
-    try {
-      const { data: deletedMessages, error } = await supabase
-        .from('messages')
-        .delete()
-        .eq('username', username)
-        .eq('room', room)
-        .select('id');
-
-      if (error) {
-        console.error('Error deleting user messages:', error);
-        return;
-      }
-
-      // Broadcast all deleted message IDs
-      const messageIds = deletedMessages.map(m => m.id);
-      io.to(room).emit('messages_deleted', { messageIds });
-      console.log(`Deleted ${messageIds.length} messages from ${username} in ${room}`);
-    } catch (err) {
-      console.error('Error in delete_user_messages:', err);
-    }
-  });
-
-  // Admin bulk delete: Clear entire room
-  socket.on('clear_room_messages', async ({ room }) => {
-    try {
-      const { error } = await supabase
-        .from('messages')
-        .delete()
-        .eq('room', room);
-
-      if (error) {
-        console.error('Error clearing room:', error);
-        return;
-      }
-
-      // Tell everyone in the room to clear all messages
-      io.to(room).emit('room_cleared');
-      console.log(`Cleared all messages in room ${room}`);
-    } catch (err) {
-      console.error('Error in clear_room_messages:', err);
-    }
-  });
-
+  
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-
-    // Remove user from online users and typing users
-    if (currentUser && currentRoom) {
-      onlineUsers[currentRoom].delete(currentUser.username);
-      typingUsers[currentRoom].delete(currentUser.username);
-      broadcastOnlineUsers(currentRoom);
-      io.to(currentRoom).emit('user_stop_typing', {
-        username: currentUser.username,
-        room: currentRoom
-      });
-    }
   });
 });
 
@@ -477,5 +476,4 @@ const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log('Connected to Supabase ✓');
-  console.log('Enhanced features: Avatars, Reactions, Edit/Delete, Online Status, Typing Indicators');
 });
