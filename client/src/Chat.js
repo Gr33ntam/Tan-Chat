@@ -98,8 +98,14 @@ function Chat({ onUsernameSet }) {
     });
 
     socket.on('upgrade_success', (data) => {
+      // Determine if upgrade or downgrade
+      const tierHierarchy = { free: 0, pro: 1, premium: 2 };
+      const oldLevel = tierHierarchy[userTier] || 0;
+      const newLevel = tierHierarchy[data.tier] || 0;
+      const isUpgrade = newLevel > oldLevel;
+      
       setUserTier(data.tier);
-      alert(`🎉 Upgraded to ${data.tier.toUpperCase()}!\n\nYou now have access to more rooms!`);
+      alert(`🎉 ${isUpgrade ? 'Upgraded' : 'Downgraded'} to ${data.tier.toUpperCase()}!\n\nYou now have ${isUpgrade ? 'more' : 'updated'} access!`);
       setShowUpgradeModal(false);
     });
 
@@ -134,7 +140,7 @@ function Chat({ onUsernameSet }) {
       socket.off('room_error');
       socket.off('my_rooms');
     };
-  }, [username]);
+  }, [username, userTier]);
 
   // Join room when component mounts or room changes
   useEffect(() => {
@@ -165,7 +171,9 @@ function Chat({ onUsernameSet }) {
   };
 
   const deleteMessage = (messageId) => {
-    socket.emit('delete_message', { messageId, username, room: currentRoom });
+    if (window.confirm('Are you sure you want to delete this message?')) {
+      socket.emit('delete_message', { messageId, username, room: currentRoom });
+    }
   };
 
   const sendMessage = () => {
@@ -540,173 +548,171 @@ function Chat({ onUsernameSet }) {
       </div>
 
       {/* Signal Form */}
-      {
-        showSignalForm && (
-          <div style={{
-            border: '2px solid #2196F3',
-            borderRadius: '12px',
-            padding: '20px',
-            marginBottom: '15px',
-            backgroundColor: '#E3F2FD',
-            boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+      {showSignalForm && (
+        <div style={{
+          border: '2px solid #2196F3',
+          borderRadius: '12px',
+          padding: '20px',
+          marginBottom: '15px',
+          backgroundColor: '#E3F2FD',
+          boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+        }}>
+          <h3 style={{ marginTop: 0, color: '#1976D2' }}>📊 Post Trading Signal</h3>
+
+          {canCreateOfficialPost() && (
+            <div style={{
+              marginBottom: '15px',
+              padding: '10px',
+              backgroundColor: isOfficialPost ? '#FF9800' : '#fff',
+              borderRadius: '8px',
+              border: '2px solid #FF9800',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer'
+            }}
+            onClick={() => setIsOfficialPost(!isOfficialPost)}
+            >
+              <span style={{ fontWeight: 'bold', color: isOfficialPost ? '#fff' : '#333' }}>
+                ⭐ Mark as Official Signal (Premium Only)
+              </span>
+              <input
+                type="checkbox"
+                checked={isOfficialPost}
+                onChange={() => setIsOfficialPost(!isOfficialPost)}
+                style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+              />
+            </div>
+          )}
+
+          <input
+            placeholder="Pair (e.g. XAUUSD, BTCUSDT)"
+            value={signalData.pair}
+            onChange={(e) => setSignalData({ ...signalData, pair: e.target.value.toUpperCase() })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <select
+            value={signalData.direction}
+            onChange={(e) => setSignalData({ ...signalData, direction: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px'
+            }}
+          >
+            <option value="BUY">BUY (Long)</option>
+            <option value="SELL">SELL (Short)</option>
+          </select>
+
+          <input
+            placeholder="Entry Price"
+            type="number"
+            step="0.01"
+            value={signalData.entry}
+            onChange={(e) => setSignalData({ ...signalData, entry: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <input
+            placeholder="Stop Loss"
+            type="number"
+            step="0.01"
+            value={signalData.stopLoss}
+            onChange={(e) => setSignalData({ ...signalData, stopLoss: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '10px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <input
+            placeholder="Take Profit"
+            type="number"
+            step="0.01"
+            value={signalData.takeProfit}
+            onChange={(e) => setSignalData({ ...signalData, takeProfit: e.target.value })}
+            style={{
+              width: '100%',
+              padding: '10px',
+              marginBottom: '12px',
+              border: '2px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+              boxSizing: 'border-box'
+            }}
+          />
+
+          <p style={{
+            fontWeight: 'bold',
+            color: '#4CAF50',
+            fontSize: '18px',
+            marginBottom: '15px'
           }}>
-            <h3 style={{ marginTop: 0, color: '#1976D2' }}>📊 Post Trading Signal</h3>
+            Risk:Reward Ratio: {calculateRR()}
+          </p>
 
-            {canCreateOfficialPost() && (
-              <div style={{
-                marginBottom: '15px',
-                padding: '10px',
-                backgroundColor: isOfficialPost ? '#FF9800' : '#fff',
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={sendSignal}
+              style={{
+                flex: 1,
+                padding: '12px',
+                backgroundColor: '#4CAF50',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
                 borderRadius: '8px',
-                border: '2px solid #FF9800',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                cursor: 'pointer'
-              }}
-                onClick={() => setIsOfficialPost(!isOfficialPost)}
-              >
-                <span style={{ fontWeight: 'bold', color: isOfficialPost ? '#fff' : '#333' }}>
-                  ⭐ Mark as Official Signal (Premium Only)
-                </span>
-                <input
-                  type="checkbox"
-                  checked={isOfficialPost}
-                  onChange={() => setIsOfficialPost(!isOfficialPost)}
-                  style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-                />
-              </div>
-            )}
-
-            <input
-              placeholder="Pair (e.g. XAUUSD, BTCUSDT)"
-              value={signalData.pair}
-              onChange={(e) => setSignalData({ ...signalData, pair: e.target.value.toUpperCase() })}
-              style={{
-                width: '100%',
-                padding: '10px',
-                marginBottom: '10px',
-                border: '2px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-
-            <select
-              value={signalData.direction}
-              onChange={(e) => setSignalData({ ...signalData, direction: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '10px',
-                marginBottom: '10px',
-                border: '2px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px'
+                fontSize: '16px',
+                fontWeight: 'bold'
               }}
             >
-              <option value="BUY">BUY (Long)</option>
-              <option value="SELL">SELL (Short)</option>
-            </select>
+              Post Signal
+            </button>
 
-            <input
-              placeholder="Entry Price"
-              type="number"
-              step="0.01"
-              value={signalData.entry}
-              onChange={(e) => setSignalData({ ...signalData, entry: e.target.value })}
+            <button
+              onClick={() => setShowSignalForm(false)}
               style={{
-                width: '100%',
-                padding: '10px',
-                marginBottom: '10px',
-                border: '2px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box'
+                flex: 1,
+                padding: '12px',
+                backgroundColor: '#f44336',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
+                borderRadius: '8px',
+                fontSize: '16px',
+                fontWeight: 'bold'
               }}
-            />
-
-            <input
-              placeholder="Stop Loss"
-              type="number"
-              step="0.01"
-              value={signalData.stopLoss}
-              onChange={(e) => setSignalData({ ...signalData, stopLoss: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '10px',
-                marginBottom: '10px',
-                border: '2px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-
-            <input
-              placeholder="Take Profit"
-              type="number"
-              step="0.01"
-              value={signalData.takeProfit}
-              onChange={(e) => setSignalData({ ...signalData, takeProfit: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '10px',
-                marginBottom: '12px',
-                border: '2px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-
-            <p style={{
-              fontWeight: 'bold',
-              color: '#4CAF50',
-              fontSize: '18px',
-              marginBottom: '15px'
-            }}>
-              Risk:Reward Ratio: {calculateRR()}
-            </p>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={sendSignal}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  backgroundColor: '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  borderRadius: '8px',
-                  fontSize: '16px',
-                  fontWeight: 'bold'
-                }}
-              >
-                Post Signal
-              </button>
-
-              <button
-                onClick={() => setShowSignalForm(false)}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  backgroundColor: '#f44336',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  borderRadius: '8px',
-                  fontSize: '16px',
-                  fontWeight: 'bold'
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+            >
+              Cancel
+            </button>
           </div>
-        )
-      }
+        </div>
+      )}
 
       {/* Message Input */}
       <div style={{
@@ -745,141 +751,135 @@ function Chat({ onUsernameSet }) {
       </div>
 
       {/* Post Signal Button */}
-      {
-        canCreateSignal() && (
-          <button
-            onClick={() => setShowSignalForm(!showSignalForm)}
-            style={{
-              width: '100%',
-              padding: '14px',
-              backgroundColor: '#FF9800',
-              color: 'white',
-              border: 'none',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              borderRadius: '8px',
-              boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
-            }}
-          >
-            📊 {showSignalForm ? 'Hide Signal Form' : 'Post Trading Signal'}
-          </button>
-        )
-      }
+      {canCreateSignal() && (
+        <button
+          onClick={() => setShowSignalForm(!showSignalForm)}
+          style={{
+            width: '100%',
+            padding: '14px',
+            backgroundColor: '#FF9800',
+            color: 'white',
+            border: 'none',
+            fontSize: '16px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            borderRadius: '8px',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
+          }}
+        >
+          📊 {showSignalForm ? 'Hide Signal Form' : 'Post Trading Signal'}
+        </button>
+      )}
 
       {/* Upgrade Modal */}
-      {
-        showUpgradeModal && (
-          <UpgradeModal
-            currentTier={userTier}
-            onClose={() => setShowUpgradeModal(false)}
-            onUpgrade={handleUpgrade}
-            suggestedTier={selectedUpgradeTier}
-          />
-        )
-      }
+      {showUpgradeModal && (
+        <UpgradeModal
+          currentTier={userTier}
+          onClose={() => setShowUpgradeModal(false)}
+          onUpgrade={handleUpgrade}
+          suggestedTier={selectedUpgradeTier}
+        />
+      )}
 
       {/* Create Private Room Modal */}
-      {
-        showPrivateRoomModal && (
+      {showPrivateRoomModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
           <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.7)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
+            backgroundColor: '#fff',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '500px',
+            width: '90%'
           }}>
-            <div style={{
-              backgroundColor: '#fff',
-              borderRadius: '16px',
-              padding: '30px',
-              maxWidth: '500px',
-              width: '90%'
-            }}>
-              <h2 style={{ marginTop: 0 }}>🔒 Create Private Room</h2>
-              <p style={{ color: '#666', marginBottom: '20px' }}>
-                Premium feature - Create your own private trading room
-              </p>
+            <h2 style={{ marginTop: 0 }}>🔒 Create Private Room</h2>
+            <p style={{ color: '#666', marginBottom: '20px' }}>
+              Premium feature - Create your own private trading room
+            </p>
 
-              <input
-                placeholder="Room Name"
-                value={newRoomData.name}
-                onChange={(e) => setNewRoomData({ ...newRoomData, name: e.target.value })}
+            <input
+              placeholder="Room Name"
+              value={newRoomData.name}
+              onChange={(e) => setNewRoomData({ ...newRoomData, name: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '12px',
+                marginBottom: '12px',
+                border: '2px solid #ddd',
+                borderRadius: '8px',
+                fontSize: '16px',
+                boxSizing: 'border-box'
+              }}
+            />
+
+            <textarea
+              placeholder="Description (optional)"
+              value={newRoomData.description}
+              onChange={(e) => setNewRoomData({ ...newRoomData, description: e.target.value })}
+              style={{
+                width: '100%',
+                padding: '12px',
+                marginBottom: '20px',
+                border: '2px solid #ddd',
+                borderRadius: '8px',
+                fontSize: '16px',
+                boxSizing: 'border-box',
+                minHeight: '80px',
+                resize: 'vertical'
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={createPrivateRoom}
                 style={{
-                  width: '100%',
+                  flex: 1,
                   padding: '12px',
-                  marginBottom: '12px',
-                  border: '2px solid #ddd',
+                  backgroundColor: '#673AB7',
+                  color: 'white',
+                  border: 'none',
                   borderRadius: '8px',
-                  fontSize: '16px',
-                  boxSizing: 'border-box'
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px'
                 }}
-              />
-
-              <textarea
-                placeholder="Description (optional)"
-                value={newRoomData.description}
-                onChange={(e) => setNewRoomData({ ...newRoomData, description: e.target.value })}
+              >
+                Create Room
+              </button>
+              <button
+                onClick={() => {
+                  setShowPrivateRoomModal(false);
+                  setNewRoomData({ name: '', description: '' });
+                }}
                 style={{
-                  width: '100%',
+                  flex: 1,
                   padding: '12px',
-                  marginBottom: '20px',
-                  border: '2px solid #ddd',
+                  backgroundColor: '#f0f0f0',
+                  color: '#333',
+                  border: 'none',
                   borderRadius: '8px',
-                  fontSize: '16px',
-                  boxSizing: 'border-box',
-                  minHeight: '80px',
-                  resize: 'vertical'
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px'
                 }}
-              />
-
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  onClick={createPrivateRoom}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#673AB7',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '16px'
-                  }}
-                >
-                  Create Room
-                </button>
-                <button
-                  onClick={() => {
-                    setShowPrivateRoomModal(false);
-                    setNewRoomData({ name: '', description: '' });
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#f0f0f0',
-                    color: '#333',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '16px'
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
+              >
+                Cancel
+              </button>
             </div>
           </div>
-        )
-      }
-    </div >
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -985,7 +985,15 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
                 {!isCurrent && (
                   <button
                     onClick={() => {
-                      onUpgrade(tier);
+                      const tierHierarchy = { free: 0, pro: 1, premium: 2 };
+                      const currentLevel = tierHierarchy[currentTier] || 0;
+                      const targetLevel = tierHierarchy[tier] || 0;
+                      const isUpgrade = targetLevel > currentLevel;
+                      const action = isUpgrade ? 'Upgrade' : 'Downgrade';
+                      
+                      if (window.confirm(`Are you sure you want to ${action.toLowerCase()} to ${info.name}?`)) {
+                        onUpgrade(tier);
+                      }
                     }}
                     style={{
                       width: '100%',
@@ -999,7 +1007,12 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
                       marginTop: '10px'
                     }}
                   >
-                    {tier === 'free' ? 'Downgrade' : 'Upgrade'} to {info.name}
+                    {(() => {
+                      const tierHierarchy = { free: 0, pro: 1, premium: 2 };
+                      const currentLevel = tierHierarchy[currentTier] || 0;
+                      const targetLevel = tierHierarchy[tier] || 0;
+                      return targetLevel > currentLevel ? 'Upgrade' : 'Downgrade';
+                    })()} to {info.name}
                   </button>
                 )}
 
