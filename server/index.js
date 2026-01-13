@@ -9,8 +9,8 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://tan-chat-gamma.vercel.app",
-    "https://tan-chat-hb1n4yc1n-sean-mcclures-projects.vercel.app"
+    /^https:\/\/tan-chat.*\.vercel\.app$/,
+    "https://tan-chat-gamma.vercel.app"
   ],
   credentials: true
 }));
@@ -20,8 +20,8 @@ const io = socketIo(server, {
   cors: {
     origin: [
       "http://localhost:3000",
-      "https://tan-chat-gamma.vercel.app",
-      "https://tan-chat-hb1n4yc1n-sean-mcclures-projects.vercel.app"
+      /^https:\/\/tan-chat.*\.vercel\.app$/,
+      "https://tan-chat-gamma.vercel.app"
     ],
     methods: ["GET", "POST"],
     credentials: true
