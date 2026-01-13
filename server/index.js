@@ -9,7 +9,8 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "https://tan-chat-gamma.vercel.app"
+    "https://tan-chat-gamma.vercel.app",
+    "https://tan-chat-hb1n4yc1n-sean-mcclures-projects.vercel.app"
   ],
   credentials: true
 }));
@@ -19,7 +20,8 @@ const io = socketIo(server, {
   cors: {
     origin: [
       "http://localhost:3000",
-      "https://tan-chat-gamma.vercel.app"
+      "https://tan-chat-gamma.vercel.app",
+      "https://tan-chat-hb1n4yc1n-sean-mcclures-projects.vercel.app"
     ],
     methods: ["GET", "POST"],
     credentials: true
@@ -48,23 +50,23 @@ async function getOrCreateUser(username) {
       .select('*')
       .eq('username', username)
       .single();
-    
+
     if (existingUser) {
       return existingUser;
     }
-    
+
     // Create new user with free tier
     const { data: newUser, error: createError } = await supabase
       .from('users')
       .insert([{ username, subscription_tier: 'free' }])
       .select()
       .single();
-    
+
     if (createError) {
       console.error('Error creating user:', createError);
       return null;
     }
-    
+
     return newUser;
   } catch (err) {
     console.error('Error in getOrCreateUser:', err);
@@ -121,9 +123,9 @@ async function getUserRoleInRoom(username, roomId) {
 
 io.on('connection', async (socket) => {
   console.log('User connected:', socket.id);
-  
+
   let currentUser = null;
-  
+
   // Register user
   socket.on('register_user', async (username) => {
     currentUser = await getOrCreateUser(username);
@@ -137,26 +139,26 @@ io.on('connection', async (socket) => {
       socket.emit('registration_error', 'Failed to register user');
     }
   });
-  
+
   // Join a specific room
   socket.on('join_room', async ({ room, username }) => {
     // Get user data
     const user = await getOrCreateUser(username);
-    
+
     if (!user) {
       socket.emit('room_error', { message: 'User not found' });
       return;
     }
-    
+
     // Check if it's a private room
     const isPrivate = await isPrivateRoom(room);
-    
+
     if (isPrivate) {
       // Check private room access
       const hasAccess = await hasPrivateRoomAccess(username, room);
       if (!hasAccess) {
-        socket.emit('room_locked', { 
-          room, 
+        socket.emit('room_locked', {
+          room,
           requiredTier: 'premium',
           message: 'You need to be invited to this private room'
         });
@@ -165,8 +167,8 @@ io.on('connection', async (socket) => {
     } else {
       // Check public room access
       if (!hasRoomAccess(user.subscription_tier, room)) {
-        socket.emit('room_locked', { 
-          room, 
+        socket.emit('room_locked', {
+          room,
           requiredTier: room === 'stocks' ? 'premium' : 'pro',
           message: `Upgrade to ${room === 'stocks' ? 'Premium' : 'Pro'} to access ${room} room`
         });
@@ -174,17 +176,17 @@ io.on('connection', async (socket) => {
         return;
       }
     }
-    
+
     // Leave all previous rooms
     const rooms = Array.from(socket.rooms);
     rooms.forEach(r => {
       if (r !== socket.id) socket.leave(r);
     });
-    
+
     // Join the new room
     socket.join(room);
     console.log(`User ${socket.id} (${username}) joined room: ${room}`);
-    
+
     // Load messages for this room
     try {
       const { data: messages, error } = await supabase
@@ -192,7 +194,7 @@ io.on('connection', async (socket) => {
         .select('*')
         .eq('room', room)
         .order('created_at', { ascending: true });
-      
+
       if (error) {
         console.error('Error loading messages:', error);
       } else {
@@ -202,7 +204,7 @@ io.on('connection', async (socket) => {
       console.error('Database error:', err);
     }
   });
-  
+
   // Send message (updated to support official posts)
   socket.on('send_message', async (data) => {
     try {
@@ -233,14 +235,14 @@ io.on('connection', async (socket) => {
         socket.emit('message_error', 'Only Pro and Premium users can create official posts');
         return;
       }
-      
+
       // Save to database
       const { data: newMessage, error } = await supabase
         .from('messages')
         .insert([data])
         .select()
         .single();
-      
+
       if (error) {
         console.error('Error saving message:', error);
         return;
@@ -258,11 +260,11 @@ io.on('connection', async (socket) => {
             outcome: 'pending'
           }]);
       }
-      
+
       // Broadcast ONLY to users in the same room
       io.to(data.room).emit('new_message', newMessage);
       console.log(`Message saved and broadcast to room ${data.room}:`, newMessage.id);
-      
+
     } catch (err) {
       console.error('Error processing message:', err);
     }
@@ -272,7 +274,7 @@ io.on('connection', async (socket) => {
   socket.on('create_private_room', async ({ username, roomName, description }) => {
     try {
       const user = await getOrCreateUser(username);
-      
+
       if (!user) {
         socket.emit('room_error', { message: 'User not found' });
         return;
@@ -331,7 +333,7 @@ io.on('connection', async (socket) => {
     try {
       // Check if inviter has permission (owner or moderator)
       const inviterRole = await getUserRoleInRoom(inviterUsername, roomId);
-      
+
       if (!inviterRole || (inviterRole !== 'owner' && inviterRole !== 'moderator')) {
         socket.emit('room_error', { message: 'You do not have permission to invite users' });
         return;
@@ -372,7 +374,7 @@ io.on('connection', async (socket) => {
     try {
       // Check if remover has permission (owner or moderator)
       const removerRole = await getUserRoleInRoom(removerUsername, roomId);
-      
+
       if (!removerRole || (removerRole !== 'owner' && removerRole !== 'moderator')) {
         socket.emit('room_error', { message: 'You do not have permission to remove users' });
         return;
@@ -427,26 +429,26 @@ io.on('connection', async (socket) => {
       socket.emit('rooms_error', { message: 'Failed to fetch rooms' });
     }
   });
-  
+
   // Mock payment - upgrade user
   socket.on('upgrade_subscription', async ({ username, tier }) => {
     try {
       const { data: updatedUser, error } = await supabase
         .from('users')
-        .update({ 
+        .update({
           subscription_tier: tier,
           updated_at: new Date().toISOString()
         })
         .eq('username', username)
         .select()
         .single();
-      
+
       if (error) {
         console.error('Error upgrading user:', error);
         socket.emit('upgrade_error', 'Failed to upgrade');
         return;
       }
-      
+
       socket.emit('upgrade_success', {
         username: updatedUser.username,
         tier: updatedUser.subscription_tier
@@ -459,13 +461,13 @@ io.on('connection', async (socket) => {
       });
 
       console.log(`User upgraded: ${username} -> ${tier}`);
-      
+
     } catch (err) {
       console.error('Error in upgrade:', err);
       socket.emit('upgrade_error', 'Failed to upgrade');
     }
   });
-  
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
