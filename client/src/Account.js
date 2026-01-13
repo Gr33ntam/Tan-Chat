@@ -15,6 +15,12 @@ const TIERS = {
   premium: { name: 'Premium', price: '$19.99/mo', icon: '👑', color: '#9C27B0' }
 };
 
+const AVATAR_OPTIONS = [
+  '👤', '😀', '😎', '🤓', '👨‍💼', '👩‍💼', '👨‍💻', '👩‍💻', 
+  '🧑‍🚀', '👨‍🎨', '👩‍🎨', '🦸', '🦹', '🧙', '🧛', '🧟',
+  '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼'
+];
+
 function Account({ username: propUsername, onLogout }) {
   const navigate = useNavigate();
   const username = propUsername || localStorage.getItem('username');
@@ -25,12 +31,8 @@ function Account({ username: propUsername, onLogout }) {
     accountAge: 0
   });
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  // Generate avatar URL using DiceBear API
-  const getAvatar = (username) => {
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`;
-  };
 
   useEffect(() => {
     if (username) {
@@ -100,6 +102,36 @@ function Account({ username: propUsername, onLogout }) {
     socket.emit('upgrade_subscription', { username, tier });
   };
 
+  const handleAvatarChange = async (newAvatar) => {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ avatar: newAvatar })
+        .eq('username', username);
+
+      if (error) {
+        console.error('Error updating avatar:', error);
+        alert('Failed to update avatar');
+      } else {
+        setUserData({ ...userData, avatar: newAvatar });
+        setShowAvatarModal(false);
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      alert('Failed to update avatar');
+    }
+  };
+
+  const handleLogoutClick = () => {
+    if (window.confirm('Are you sure you want to logout?')) {
+      localStorage.removeItem('username');
+      if (onLogout) {
+        onLogout();
+      }
+      navigate('/');
+    }
+  };
+
   if (!username) {
     return (
       <div style={{ 
@@ -141,6 +173,7 @@ function Account({ username: propUsername, onLogout }) {
   }
 
   const currentTier = TIERS[userData.subscription_tier] || TIERS.free;
+  const userAvatar = userData.avatar || '👤';
 
   return (
     <div style={{
@@ -162,20 +195,48 @@ function Account({ username: propUsername, onLogout }) {
           alignItems: 'center'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <img 
-              src={getAvatar(username)} 
-              alt={username}
-              style={{ 
-                width: '80px', 
-                height: '80px', 
+            <div style={{ position: 'relative' }}>
+              <div style={{
+                width: '100px',
+                height: '100px',
                 borderRadius: '50%',
-                border: '4px solid #2196F3',
-                boxShadow: '0 4px 8px rgba(0,0,0,0.1)'
+                backgroundColor: '#e0e0e0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '60px',
+                border: '4px solid ' + currentTier.color,
+                cursor: 'pointer'
               }}
-            />
+              onClick={() => setShowAvatarModal(true)}
+              >
+                {userAvatar}
+              </div>
+              <button
+                onClick={() => setShowAvatarModal(true)}
+                style={{
+                  position: 'absolute',
+                  bottom: '0',
+                  right: '0',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  backgroundColor: '#2196F3',
+                  color: 'white',
+                  border: '2px solid white',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ✏️
+              </button>
+            </div>
             <div>
               <h1 style={{ margin: 0, color: '#333', fontSize: '32px' }}>
-                👤 My Account
+                My Account
               </h1>
               <p style={{ margin: '10px 0 0 0', color: '#666', fontSize: '16px' }}>
                 Welcome back, <strong>{username}</strong>!
@@ -199,7 +260,7 @@ function Account({ username: propUsername, onLogout }) {
               💬 Chat
             </button>
             <button
-              onClick={onLogout}
+              onClick={handleLogoutClick}
               style={{
                 padding: '10px 20px',
                 backgroundColor: '#f44336',
@@ -333,6 +394,73 @@ function Account({ username: propUsername, onLogout }) {
           onClose={() => setShowUpgradeModal(false)}
           onUpgrade={handleUpgrade}
         />
+      )}
+
+      {/* Avatar Selection Modal */}
+      {showAvatarModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '500px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }}>
+            <h2 style={{ marginTop: 0, textAlign: 'center' }}>Choose Your Avatar</h2>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(6, 1fr)',
+              gap: '10px',
+              marginBottom: '20px'
+            }}>
+              {AVATAR_OPTIONS.map((avatar, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleAvatarChange(avatar)}
+                  style={{
+                    width: '60px',
+                    height: '60px',
+                    fontSize: '32px',
+                    border: userAvatar === avatar ? '3px solid #2196F3' : '2px solid #ddd',
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    backgroundColor: userAvatar === avatar ? '#E3F2FD' : '#fff',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {avatar}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowAvatarModal(false)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                backgroundColor: '#f0f0f0',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
