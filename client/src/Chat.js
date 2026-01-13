@@ -18,19 +18,19 @@ const TIERS = {
   premium: { name: 'Premium', price: '$19.99/mo', rooms: ['General', 'Forex', 'Crypto', 'Stocks'] }
 };
 
-function Chat() {
+function Chat({ onUsernameSet }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [username, setUsername] = useState('');
-  const [joined, setJoined] = useState(false);
+  const [username, setUsername] = useState(localStorage.getItem('username') || ''); // NEW: Load from localStorage
+  const [joined, setJoined] = useState(!!localStorage.getItem('username')); // NEW: Auto-join if username exists
   const [showSignalForm, setShowSignalForm] = useState(false);
   const [currentRoom, setCurrentRoom] = useState('general');
   const [userTier, setUserTier] = useState('free');
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedUpgradeTier, setSelectedUpgradeTier] = useState(null);
-  const [isOfficialPost, setIsOfficialPost] = useState(false); // NEW: Official post toggle
-  const [privateRooms, setPrivateRooms] = useState([]); // NEW: Private rooms list
-  const [showPrivateRoomModal, setShowPrivateRoomModal] = useState(false); // NEW: Create room modal
+  const [isOfficialPost, setIsOfficialPost] = useState(false);
+  const [privateRooms, setPrivateRooms] = useState([]);
+  const [showPrivateRoomModal, setShowPrivateRoomModal] = useState(false);
   const messagesEndRef = useRef(null);
 
   // Signal form state
@@ -53,13 +53,23 @@ function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // NEW: Load private rooms function (moved outside useEffect)
+  const loadPrivateRooms = () => {
+    if (username) {
+      socket.emit('get_my_rooms', { username });
+    }
+  };
+
   // Register user and get tier
   useEffect(() => {
     if (joined && username) {
       socket.emit('register_user', username);
-      loadPrivateRooms(); // NEW: Load user's private rooms
+      loadPrivateRooms();
+      if (onUsernameSet) {
+        onUsernameSet(username); // NEW: Pass username to parent
+      }
     }
-  }, [joined, username]);
+  }, [joined, username, onUsernameSet]);
 
   // Socket listeners
   useEffect(() => {
@@ -94,10 +104,10 @@ function Chat() {
       alert('❌ Upgrade failed. Please try again.');
     });
 
-    // NEW: Private room listeners
+    // Private room listeners
     socket.on('room_created', (data) => {
       alert('✅ Private room created successfully!');
-      loadPrivateRooms();
+      loadPrivateRooms(); // NEW: This should now work properly
       setShowPrivateRoomModal(false);
       setNewRoomData({ name: '', description: '' });
     });
@@ -121,7 +131,7 @@ function Chat() {
       socket.off('room_error');
       socket.off('my_rooms');
     };
-  }, []);
+  }, [username]); // NEW: Added username dependency
 
   // Join room when component mounts or room changes
   useEffect(() => {
@@ -129,11 +139,6 @@ function Chat() {
       socket.emit('join_room', { room: currentRoom, username });
     }
   }, [currentRoom, joined, username]);
-
-  // NEW: Load user's private rooms
-  const loadPrivateRooms = () => {
-    socket.emit('get_my_rooms', { username });
-  };
 
   // NEW: Check if user can create official posts
   const canCreateOfficialPost = () => {
@@ -145,6 +150,16 @@ function Chat() {
     return userTier === 'premium';
   };
 
+  // NEW: Logout function
+  const handleLogout = () => {
+    localStorage.removeItem('username');
+    setUsername('');
+    setJoined(false);
+    setUserTier('free');
+    setMessages([]);
+    setPrivateRooms([]);
+  };
+
   const sendMessage = () => {
     if (input.trim()) {
       socket.emit('send_message', {
@@ -153,11 +168,11 @@ function Chat() {
         text: input,
         room: currentRoom,
         timestamp: new Date().toISOString(),
-        is_official: isOfficialPost, // NEW: Include official post flag
+        is_official: isOfficialPost,
         post_type: isOfficialPost ? 'official_signal' : 'comment'
       });
       setInput('');
-      setIsOfficialPost(false); // Reset after sending
+      setIsOfficialPost(false);
     }
   };
 
@@ -194,7 +209,7 @@ function Chat() {
           riskReward: calculateRR()
         },
         timestamp: new Date().toISOString(),
-        is_official: isOfficialPost, // NEW: Include official post flag
+        is_official: isOfficialPost,
         post_type: isOfficialPost ? 'official_signal' : 'comment'
       });
 
@@ -206,11 +221,11 @@ function Chat() {
         takeProfit: ''
       });
       setShowSignalForm(false);
-      setIsOfficialPost(false); // Reset after sending
+      setIsOfficialPost(false);
     }
   };
 
-  // NEW: Create private room
+  // Create private room
   const createPrivateRoom = () => {
     if (newRoomData.name.trim()) {
       socket.emit('create_private_room', {
@@ -304,7 +319,7 @@ function Chat() {
     );
   }
 
-  // NEW: Combine public and private rooms
+  // Combine public and private rooms
   const allRooms = [
     ...PUBLIC_ROOMS,
     ...privateRooms.map(pr => ({
@@ -343,7 +358,6 @@ function Chat() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
-          {/* NEW: Create Private Room Button (Premium only) */}
           {canCreatePrivateRoom() && (
             <button
               onClick={() => setShowPrivateRoomModal(true)}
@@ -391,6 +405,22 @@ function Chat() {
             disabled={userTier === 'premium'}
           >
             {userTier === 'premium' ? '✓ Premium' : '⬆️ Upgrade'}
+          </button>
+          {/* NEW: Logout Button */}
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+          >
+            🚪 Logout
           </button>
         </div>
       </div>
@@ -455,16 +485,15 @@ function Chat() {
           <div key={i} style={{ marginBottom: '15px' }}>
             {msg.type === 'text' ? (
               <div style={{
-                backgroundColor: msg.is_official ? '#FFF3E0' : '#fff', // NEW: Different color for official posts
+                backgroundColor: msg.is_official ? '#FFF3E0' : '#fff',
                 padding: '12px',
                 borderRadius: '8px',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: msg.is_official ? '2px solid #FF9800' : 'none' // NEW: Border for official posts
+                border: msg.is_official ? '2px solid #FF9800' : 'none'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <strong style={{ color: currentRoomInfo.color }}>{msg.username}</strong>
-                    {/* NEW: Official post badge */}
                     {msg.is_official && (
                       <span style={{
                         backgroundColor: '#FF9800',
@@ -490,7 +519,7 @@ function Chat() {
                 username={msg.username}
                 timestamp={msg.timestamp}
                 formatTime={formatTime}
-                isOfficial={msg.is_official} // NEW: Pass official flag
+                isOfficial={msg.is_official}
               />
             )}
           </div>
@@ -510,7 +539,6 @@ function Chat() {
         }}>
           <h3 style={{ marginTop: 0, color: '#1976D2' }}>📊 Post Trading Signal</h3>
 
-          {/* NEW: Official Post Toggle */}
           {canCreateOfficialPost() && (
             <div style={{
               marginBottom: '15px',
@@ -523,7 +551,7 @@ function Chat() {
               justifyContent: 'space-between',
               cursor: 'pointer'
             }}
-            onClick={() => setIsOfficialPost(!isOfficialPost)}
+              onClick={() => setIsOfficialPost(!isOfficialPost)}
             >
               <span style={{ fontWeight: 'bold', color: isOfficialPost ? '#fff' : '#333' }}>
                 ⭐ Mark as Official Post
@@ -702,7 +730,6 @@ function Chat() {
         </button>
       </div>
 
-      {/* NEW: Official Post Checkbox for Text Messages */}
       {canCreateOfficialPost() && (
         <div style={{
           marginBottom: '10px',
@@ -715,7 +742,7 @@ function Chat() {
           gap: '10px',
           cursor: 'pointer'
         }}
-        onClick={() => setIsOfficialPost(!isOfficialPost)}
+          onClick={() => setIsOfficialPost(!isOfficialPost)}
         >
           <input
             type="checkbox"
@@ -758,7 +785,7 @@ function Chat() {
         />
       )}
 
-      {/* NEW: Create Private Room Modal */}
+      {/* Create Private Room Modal */}
       {showPrivateRoomModal && (
         <div style={{
           position: 'fixed',
@@ -889,7 +916,6 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
           Get access to premium trading rooms and exclusive features
         </p>
 
-        {/* Tier Cards */}
         <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
           {Object.entries(TIERS).map(([tier, info]) => {
             const isCurrent = tier === currentTier;
@@ -943,7 +969,6 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
                   </ul>
                 </div>
 
-                {/* NEW: Show official post feature */}
                 {tier !== 'free' && (
                   <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
                     ⭐ Create Official Posts
@@ -1020,7 +1045,7 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
   );
 }
 
-// Signal Card Component (Updated)
+// Signal Card Component
 function SignalCard({ signal, username, timestamp, formatTime, isOfficial }) {
   const isBuy = signal.direction === 'BUY';
 
@@ -1029,9 +1054,9 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial }) {
       border: `3px solid ${isBuy ? '#4CAF50' : '#f44336'}`,
       borderRadius: '12px',
       padding: '18px',
-      backgroundColor: isOfficial 
-        ? (isBuy ? '#E8F5E9' : '#FFEBEE') 
-        : (isBuy ? '#F1F8E9' : '#FCE4EC'), // NEW: Lighter color for non-official
+      backgroundColor: isOfficial
+        ? (isBuy ? '#E8F5E9' : '#FFEBEE')
+        : (isBuy ? '#F1F8E9' : '#FCE4EC'),
       boxShadow: '0 4px 8px rgba(0,0,0,0.15)'
     }}>
       <div style={{
@@ -1048,7 +1073,6 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial }) {
           }}>
             {signal.direction} {signal.pair}
           </div>
-          {/* NEW: Official badge for signals */}
           {isOfficial && (
             <span style={{
               backgroundColor: '#FF9800',
