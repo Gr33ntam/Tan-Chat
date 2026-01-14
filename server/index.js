@@ -50,23 +50,23 @@ async function getOrCreateUser(username) {
       .select('*')
       .eq('username', username)
       .single();
-    
+
     if (existingUser) {
       return existingUser;
     }
-    
+
     // Create new user with free tier
     const { data: newUser, error: createError } = await supabase
       .from('users')
       .insert([{ username, subscription_tier: 'free' }])
       .select()
       .single();
-    
+
     if (createError) {
       console.error('Error creating user:', createError);
       return null;
     }
-    
+
     return newUser;
   } catch (err) {
     console.error('Error in getOrCreateUser:', err);
@@ -123,9 +123,9 @@ async function getUserRoleInRoom(username, roomId) {
 
 io.on('connection', async (socket) => {
   console.log('User connected:', socket.id);
-  
+
   let currentUser = null;
-  
+
   // Register user
   socket.on('register_user', async (username) => {
     currentUser = await getOrCreateUser(username);
@@ -139,26 +139,26 @@ io.on('connection', async (socket) => {
       socket.emit('registration_error', 'Failed to register user');
     }
   });
-  
+
   // Join a specific room
   socket.on('join_room', async ({ room, username }) => {
     // Get user data
     const user = await getOrCreateUser(username);
-    
+
     if (!user) {
       socket.emit('room_error', { message: 'User not found' });
       return;
     }
-    
+
     // Check if it's a private room
     const isPrivate = await isPrivateRoom(room);
-    
+
     if (isPrivate) {
       // Check private room access
       const hasAccess = await hasPrivateRoomAccess(username, room);
       if (!hasAccess) {
-        socket.emit('room_locked', { 
-          room, 
+        socket.emit('room_locked', {
+          room,
           requiredTier: 'premium',
           message: 'You need to be invited to this private room'
         });
@@ -167,8 +167,8 @@ io.on('connection', async (socket) => {
     } else {
       // Check public room access
       if (!hasRoomAccess(user.subscription_tier, room)) {
-        socket.emit('room_locked', { 
-          room, 
+        socket.emit('room_locked', {
+          room,
           requiredTier: room === 'stocks' ? 'premium' : 'pro',
           message: `Upgrade to ${room === 'stocks' ? 'Premium' : 'Pro'} to access ${room} room`
         });
@@ -176,17 +176,17 @@ io.on('connection', async (socket) => {
         return;
       }
     }
-    
+
     // Leave all previous rooms
     const rooms = Array.from(socket.rooms);
     rooms.forEach(r => {
       if (r !== socket.id) socket.leave(r);
     });
-    
+
     // Join the new room
     socket.join(room);
     console.log(`User ${socket.id} (${username}) joined room: ${room}`);
-    
+
     // Load messages for this room
     try {
       const { data: messages, error } = await supabase
@@ -194,7 +194,7 @@ io.on('connection', async (socket) => {
         .select('*')
         .eq('room', room)
         .order('created_at', { ascending: true });
-      
+
       if (error) {
         console.error('Error loading messages:', error);
       } else {
@@ -204,7 +204,7 @@ io.on('connection', async (socket) => {
       console.error('Database error:', err);
     }
   });
-  
+
   // Send message (updated to support official posts)
   socket.on('send_message', async (data) => {
     try {
@@ -235,14 +235,14 @@ io.on('connection', async (socket) => {
         socket.emit('message_error', 'Only Pro and Premium users can create official posts');
         return;
       }
-      
+
       // Save to database
       const { data: newMessage, error } = await supabase
         .from('messages')
         .insert([data])
         .select()
         .single();
-      
+
       if (error) {
         console.error('Error saving message:', error);
         return;
@@ -260,11 +260,11 @@ io.on('connection', async (socket) => {
             outcome: 'pending'
           }]);
       }
-      
+
       // Broadcast ONLY to users in the same room
       io.to(data.room).emit('new_message', newMessage);
       console.log(`Message saved and broadcast to room ${data.room}:`, newMessage.id);
-      
+
     } catch (err) {
       console.error('Error processing message:', err);
     }
@@ -274,7 +274,7 @@ io.on('connection', async (socket) => {
   socket.on('create_private_room', async ({ username, roomName, description }) => {
     try {
       const user = await getOrCreateUser(username);
-      
+
       if (!user) {
         socket.emit('room_error', { message: 'User not found' });
         return;
@@ -333,7 +333,7 @@ io.on('connection', async (socket) => {
     try {
       // Check if inviter has permission (owner or moderator)
       const inviterRole = await getUserRoleInRoom(inviterUsername, roomId);
-      
+
       if (!inviterRole || (inviterRole !== 'owner' && inviterRole !== 'moderator')) {
         socket.emit('room_error', { message: 'You do not have permission to invite users' });
         return;
@@ -374,7 +374,7 @@ io.on('connection', async (socket) => {
     try {
       // Check if remover has permission (owner or moderator)
       const removerRole = await getUserRoleInRoom(removerUsername, roomId);
-      
+
       if (!removerRole || (removerRole !== 'owner' && removerRole !== 'moderator')) {
         socket.emit('room_error', { message: 'You do not have permission to remove users' });
         return;
@@ -445,7 +445,6 @@ io.on('connection', async (socket) => {
         socket.emit('room_error', { message: 'Cannot delete this message' });
         return;
       }
-
       // Delete the message
       const { error: deleteError } = await supabase
         .from('messages')
@@ -460,7 +459,7 @@ io.on('connection', async (socket) => {
 
       // Broadcast deletion to all users in the room
       io.to(room).emit('message_deleted', { messageId });
-      
+
       console.log(`Message ${messageId} deleted by ${username}`);
 
     } catch (err) {
@@ -468,26 +467,210 @@ io.on('connection', async (socket) => {
       socket.emit('room_error', { message: 'Failed to delete message' });
     }
   });
-  
+
+  // Update signal outcome
+  socket.on('update_signal_outcome', async ({ messageId, username, outcome, closePrice, closedBy }) => {
+    try {
+      // Get the message to verify it's the author
+      const { data: message, error: msgError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('id', messageId)
+        .single();
+
+      if (msgError || !message) {
+        socket.emit('signal_error', { message: 'Signal not found' });
+        return;
+      }
+
+      // Verify user is the author
+      if (message.username !== username) {
+        socket.emit('signal_error', { message: 'Only the signal author can update outcomes' });
+        return;
+      }
+
+      // Get the official post metadata
+      const { data: metadata, error: metaError } = await supabase
+        .from('official_posts_metadata')
+        .select('*')
+        .eq('message_id', messageId)
+        .single();
+
+      if (metaError || !metadata) {
+        socket.emit('signal_error', { message: 'Signal metadata not found' });
+        return;
+      }
+
+      // Calculate pips gained
+      let pipsGained = 0;
+      if (closePrice && message.signal) {
+        const entry = parseFloat(message.signal.entry);
+        const close = parseFloat(closePrice);
+        const direction = message.signal.direction;
+
+        if (direction === 'BUY') {
+          pipsGained = close - entry;
+        } else {
+          pipsGained = entry - close;
+        }
+      }
+
+      // Update the metadata
+      const { error: updateError } = await supabase
+        .from('official_posts_metadata')
+        .update({
+          outcome: outcome,
+          status: outcome === 'pending' ? 'active' : 'closed',
+          closed_at: outcome === 'pending' ? null : new Date().toISOString(),
+          close_price: closePrice || null,
+          pips_gained: pipsGained,
+          closed_by: closedBy || null
+        })
+        .eq('message_id', messageId);
+
+      if (updateError) {
+        console.error('Error updating signal:', updateError);
+        socket.emit('signal_error', { message: 'Failed to update signal' });
+        return;
+      }
+
+      // Broadcast the update to all users in the room
+      io.to(message.room).emit('signal_updated', {
+        messageId,
+        outcome,
+        closePrice,
+        pipsGained,
+        closedBy,
+        closedAt: outcome === 'pending' ? null : new Date().toISOString()
+      });
+
+      socket.emit('signal_update_success', { message: 'Signal updated successfully' });
+      console.log(`Signal ${messageId} updated by ${username}: ${outcome}`);
+
+    } catch (err) {
+      console.error('Error updating signal outcome:', err);
+      socket.emit('signal_error', { message: 'Failed to update signal' });
+    }
+  });
+
+  // Get user statistics
+  socket.on('get_user_stats', async ({ username }) => {
+    try {
+      // Get all official signals by this user
+      const { data: signals, error } = await supabase
+        .from('official_posts_metadata')
+        .select('*')
+        .eq('author_username', username);
+
+      if (error) {
+        console.error('Error fetching user stats:', error);
+        socket.emit('user_stats', { stats: null });
+        return;
+      }
+
+      // Calculate statistics
+      const totalSignals = signals.length;
+      const wonSignals = signals.filter(s => s.outcome === 'won').length;
+      const lostSignals = signals.filter(s => s.outcome === 'lost').length;
+      const pendingSignals = signals.filter(s => s.outcome === 'pending').length;
+      const winRate = totalSignals > 0 ? ((wonSignals / (wonSignals + lostSignals)) * 100).toFixed(1) : 0;
+
+      const totalPips = signals.reduce((sum, s) => sum + (parseFloat(s.pips_gained) || 0), 0);
+      const avgPips = totalSignals > 0 ? (totalPips / totalSignals).toFixed(2) : 0;
+
+      const stats = {
+        totalSignals,
+        wonSignals,
+        lostSignals,
+        pendingSignals,
+        winRate: parseFloat(winRate),
+        totalPips: parseFloat(totalPips.toFixed(2)),
+        avgPips: parseFloat(avgPips)
+      };
+
+      socket.emit('user_stats', { stats });
+
+    } catch (err) {
+      console.error('Error getting user stats:', err);
+      socket.emit('user_stats', { stats: null });
+    }
+  });
+
+  // Get leaderboard
+  socket.on('get_leaderboard', async () => {
+    try {
+      // Get all official signals grouped by author
+      const { data: signals, error } = await supabase
+        .from('official_posts_metadata')
+        .select('author_username, outcome, pips_gained');
+
+      if (error) {
+        console.error('Error fetching leaderboard:', error);
+        socket.emit('leaderboard_data', { leaderboard: [] });
+        return;
+      }
+
+      // Group by author and calculate stats
+      const userStats = {};
+
+      signals.forEach(signal => {
+        const author = signal.author_username;
+        if (!userStats[author]) {
+          userStats[author] = {
+            username: author,
+            totalSignals: 0,
+            wonSignals: 0,
+            lostSignals: 0,
+            totalPips: 0
+          };
+        }
+
+        userStats[author].totalSignals++;
+        if (signal.outcome === 'won') userStats[author].wonSignals++;
+        if (signal.outcome === 'lost') userStats[author].lostSignals++;
+        userStats[author].totalPips += parseFloat(signal.pips_gained) || 0;
+      });
+
+      // Calculate win rates and create leaderboard array
+      const leaderboard = Object.values(userStats)
+        .map(user => ({
+          ...user,
+          winRate: user.wonSignals + user.lostSignals > 0
+            ? ((user.wonSignals / (user.wonSignals + user.lostSignals)) * 100).toFixed(1)
+            : 0,
+          totalPips: user.totalPips.toFixed(2)
+        }))
+        .filter(user => user.wonSignals + user.lostSignals >= 3) // Minimum 3 closed signals
+        .sort((a, b) => parseFloat(b.winRate) - parseFloat(a.winRate))
+        .slice(0, 10); // Top 10
+
+      socket.emit('leaderboard_data', { leaderboard });
+
+    } catch (err) {
+      console.error('Error getting leaderboard:', err);
+      socket.emit('leaderboard_data', { leaderboard: [] });
+    }
+  });
+
   // Mock payment - upgrade user
   socket.on('upgrade_subscription', async ({ username, tier }) => {
     try {
       const { data: updatedUser, error } = await supabase
         .from('users')
-        .update({ 
+        .update({
           subscription_tier: tier,
           updated_at: new Date().toISOString()
         })
         .eq('username', username)
         .select()
         .single();
-      
+
       if (error) {
         console.error('Error upgrading user:', error);
         socket.emit('upgrade_error', 'Failed to upgrade');
         return;
       }
-      
+
       socket.emit('upgrade_success', {
         username: updatedUser.username,
         tier: updatedUser.subscription_tier
@@ -500,13 +683,13 @@ io.on('connection', async (socket) => {
       });
 
       console.log(`User upgraded: ${username} -> ${tier}`);
-      
+
     } catch (err) {
       console.error('Error in upgrade:', err);
       socket.emit('upgrade_error', 'Failed to upgrade');
     }
   });
-  
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });
