@@ -1277,9 +1277,9 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
 
   const getStatusBadge = () => {
     switch (outcome) {
-      case 'won':
+      case 'win':
         return { text: '✅ Won', bg: '#4CAF50', color: '#fff' };
-      case 'lost':
+      case 'loss':
         return { text: '❌ Lost', bg: '#f44336', color: '#fff' };
       default:
         return { text: '🟡 Pending', bg: '#FF9800', color: '#fff' };
@@ -1393,12 +1393,12 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
             <div style={{
               marginTop: '12px',
               padding: '10px',
-              backgroundColor: outcome === 'won' ? '#E8F5E9' : '#FFEBEE',
+              backgroundColor: outcome === 'win' ? '#E8F5E9' : '#FFEBEE',
               borderRadius: '8px',
-              border: `2px solid ${outcome === 'won' ? '#4CAF50' : '#f44336'}`
+              border: `2px solid ${outcome === 'win' ? '#4CAF50' : '#f44336'}`
             }}>
               <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-                {outcome === 'won' ? '💰 Profit' : '📉 Loss'}: {Math.abs(pipsGained).toFixed(2)} pips
+                {outcome === 'win' ? '💰 Profit' : '📉 Loss'}: {Math.abs(pipsGained).toFixed(2)} pips
               </div>
               {closedBy && (
                 <div style={{ fontSize: '13px', color: '#666' }}>
