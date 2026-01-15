@@ -199,6 +199,22 @@ io.on('connection', async (socket) => {
         console.error('Error loading messages:', error);
       } else {
         socket.emit('previous_messages', messages);
+
+        // Load metadata for official signals
+        const officialSignalIds = messages
+          .filter(m => m.is_official && m.type === 'signal')
+          .map(m => m.id);
+
+        if (officialSignalIds.length > 0) {
+          const { data: metadata, error: metaError } = await supabase
+            .from('official_posts_metadata')
+            .select('*')
+            .in('message_id', officialSignalIds);
+
+          if (!metaError && metadata) {
+            socket.emit('signal_metadata', { metadata });
+          }
+        }
       }
     } catch (err) {
       console.error('Database error:', err);

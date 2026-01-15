@@ -101,6 +101,20 @@ function Chat({ onUsernameSet }) {
       setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
     });
 
+    socket.on('signal_metadata', (data) => {
+      const metadataMap = {};
+      data.metadata.forEach(meta => {
+        metadataMap[meta.message_id] = {
+          outcome: meta.outcome,
+          closePrice: meta.close_price,
+          pipsGained: meta.pips_gained,
+          closedBy: meta.closed_by,
+          closedAt: meta.closed_at
+        };
+      });
+      setSignalOutcomes(metadataMap);
+    });
+
     socket.on('signal_updated', (data) => {
       setSignalOutcomes(prev => ({
         ...prev,
@@ -135,7 +149,7 @@ function Chat({ onUsernameSet }) {
       const oldLevel = tierHierarchy[userTier] || 0;
       const newLevel = tierHierarchy[data.tier] || 0;
       const isUpgrade = newLevel > oldLevel;
-      
+
       setUserTier(data.tier);
       alert(`🎉 ${isUpgrade ? 'Upgraded' : 'Downgraded'} to ${data.tier.toUpperCase()}!\n\nYou now have ${isUpgrade ? 'more' : 'updated'} access!`);
       setShowUpgradeModal(false);
@@ -165,6 +179,7 @@ function Chat({ onUsernameSet }) {
       socket.off('previous_messages');
       socket.off('new_message');
       socket.off('message_deleted');
+      socket.off('signal_metadata');
       socket.off('signal_updated');
       socket.off('signal_update_success');
       socket.off('signal_error');
@@ -638,7 +653,7 @@ function Chat({ onUsernameSet }) {
               justifyContent: 'space-between',
               cursor: 'pointer'
             }}
-            onClick={() => setIsOfficialPost(!isOfficialPost)}
+              onClick={() => setIsOfficialPost(!isOfficialPost)}
             >
               <span style={{ fontWeight: 'bold', color: isOfficialPost ? '#fff' : '#333' }}>
                 ⭐ Mark as Official Signal (Premium Only)
@@ -1184,7 +1199,7 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
                       const targetLevel = tierHierarchy[tier] || 0;
                       const isUpgrade = targetLevel > currentLevel;
                       const action = isUpgrade ? 'Upgrade' : 'Downgrade';
-                      
+
                       if (window.confirm(`Are you sure you want to ${action.toLowerCase()} to ${info.name}?`)) {
                         onUpgrade(tier);
                       }
