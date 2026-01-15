@@ -904,9 +904,9 @@ function Chat({ onUsernameSet }) {
                   fontSize: '16px'
                 }}
               >
-                <option value="won">✅ Won (Profit)</option>
-                <option value="lost">❌ Lost (Loss)</option>
-                <option value="pending">🟡 Pending (Reset)</option>
+                <option value="pending">🟡 Pending</option>
+                <option value="win">✅ Won (Profit)</option>
+                <option value="loss">❌ Lost</option>
               </select>
             </div>
 
