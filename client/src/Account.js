@@ -16,7 +16,7 @@ const TIERS = {
 };
 
 const AVATAR_OPTIONS = [
-  '👤', '😀', '😎', '🤓', '👨‍💼', '👩‍💼', '👨‍💻', '👩‍💻', 
+  '👤', '😀', '😎', '🤓', '👨‍💼', '👩‍💼', '👨‍💻', '👩‍💻',
   '🧑‍🚀', '👨‍🎨', '👩‍🎨', '🦸', '🦹', '🧙', '🧛', '🧟',
   '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼'
 ];
@@ -24,12 +24,14 @@ const AVATAR_OPTIONS = [
 function Account({ username: propUsername, onLogout }) {
   const navigate = useNavigate();
   const username = propUsername || localStorage.getItem('username');
-  
+
   const [userData, setUserData] = useState(null);
   const [stats, setStats] = useState({
     messageCount: 0,
     accountAge: 0
   });
+  const [userStats, setUserStats] = useState(null);
+  const [leaderboard, setLeaderboard] = useState([]);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -38,6 +40,8 @@ function Account({ username: propUsername, onLogout }) {
     if (username) {
       loadUserData();
       loadStats();
+      loadUserStats();
+      loadLeaderboard();
     }
   }, [username]);
 
@@ -48,8 +52,18 @@ function Account({ username: propUsername, onLogout }) {
       }
     });
 
+    socket.on('user_stats', (data) => {
+      setUserStats(data.stats);
+    });
+
+    socket.on('leaderboard_data', (data) => {
+      setLeaderboard(data.leaderboard || []);
+    });
+
     return () => {
       socket.off('upgrade_success');
+      socket.off('user_stats');
+      socket.off('leaderboard_data');
     };
   }, [username]);
 
@@ -85,7 +99,7 @@ function Account({ username: propUsername, onLogout }) {
         .eq('username', username)
         .single();
 
-      const accountAge = userData 
+      const accountAge = userData
         ? Math.floor((Date.now() - new Date(userData.created_at)) / (1000 * 60 * 60 * 24))
         : 0;
 
@@ -96,6 +110,16 @@ function Account({ username: propUsername, onLogout }) {
     } catch (err) {
       console.error('Error loading stats:', err);
     }
+  };
+
+  const loadUserStats = () => {
+    if (username) {
+      socket.emit('get_user_stats', { username });
+    }
+  };
+
+  const loadLeaderboard = () => {
+    socket.emit('get_leaderboard');
   };
 
   const handleUpgrade = (tier) => {
@@ -134,8 +158,8 @@ function Account({ username: propUsername, onLogout }) {
 
   if (!username) {
     return (
-      <div style={{ 
-        padding: '40px', 
+      <div style={{
+        padding: '40px',
         textAlign: 'center',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}>
@@ -162,8 +186,8 @@ function Account({ username: propUsername, onLogout }) {
 
   if (loading || !userData) {
     return (
-      <div style={{ 
-        padding: '40px', 
+      <div style={{
+        padding: '40px',
         textAlign: 'center',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}>
@@ -208,7 +232,7 @@ function Account({ username: propUsername, onLogout }) {
                 border: '4px solid ' + currentTier.color,
                 cursor: 'pointer'
               }}
-              onClick={() => setShowAvatarModal(true)}
+                onClick={() => setShowAvatarModal(true)}
               >
                 {userAvatar}
               </div>
@@ -341,22 +365,22 @@ function Account({ username: propUsername, onLogout }) {
           gap: '20px',
           marginBottom: '20px'
         }}>
-          <StatCard 
-            title="Total Messages" 
-            value={stats.messageCount} 
-            icon="💬" 
+          <StatCard
+            title="Total Messages"
+            value={stats.messageCount}
+            icon="💬"
             color="#2196F3"
           />
-          <StatCard 
-            title="Account Age" 
-            value={`${stats.accountAge} days`} 
-            icon="📅" 
+          <StatCard
+            title="Account Age"
+            value={`${stats.accountAge} days`}
+            icon="📅"
             color="#9C27B0"
           />
-          <StatCard 
-            title="Member Since" 
-            value={new Date(userData.created_at).toLocaleDateString()} 
-            icon="🎉" 
+          <StatCard
+            title="Member Since"
+            value={new Date(userData.created_at).toLocaleDateString()}
+            icon="🎉"
             color="#4CAF50"
           />
         </div>
@@ -371,17 +395,17 @@ function Account({ username: propUsername, onLogout }) {
           <h2 style={{ margin: '0 0 20px 0', fontSize: '22px' }}>🔓 Your Access</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <AccessItem room="💬 General" hasAccess={true} />
-            <AccessItem 
-              room="💱 Forex" 
-              hasAccess={userData.subscription_tier !== 'free'} 
+            <AccessItem
+              room="💱 Forex"
+              hasAccess={userData.subscription_tier !== 'free'}
             />
-            <AccessItem 
-              room="₿ Crypto" 
-              hasAccess={userData.subscription_tier !== 'free'} 
+            <AccessItem
+              room="₿ Crypto"
+              hasAccess={userData.subscription_tier !== 'free'}
             />
-            <AccessItem 
-              room="📈 Stocks" 
-              hasAccess={userData.subscription_tier === 'premium'} 
+            <AccessItem
+              room="📈 Stocks"
+              hasAccess={userData.subscription_tier === 'premium'}
             />
           </div>
         </div>
@@ -502,8 +526,8 @@ function AccessItem({ room, hasAccess }) {
       border: `2px solid ${hasAccess ? '#4CAF50' : '#f44336'}`
     }}>
       <span style={{ fontSize: '16px', fontWeight: 'bold' }}>{room}</span>
-      <span style={{ 
-        fontSize: '14px', 
+      <span style={{
+        fontSize: '14px',
         fontWeight: 'bold',
         color: hasAccess ? '#4CAF50' : '#f44336'
       }}>
@@ -572,9 +596,9 @@ function UpgradeModal({ currentTier, onClose, onUpgrade }) {
                 <h3 style={{ marginTop: 0, textAlign: 'center' }}>
                   {info.icon} {info.name}
                 </h3>
-                <p style={{ 
-                  textAlign: 'center', 
-                  fontSize: '24px', 
+                <p style={{
+                  textAlign: 'center',
+                  fontSize: '24px',
                   fontWeight: 'bold',
                   margin: '10px 0',
                   color: info.color
