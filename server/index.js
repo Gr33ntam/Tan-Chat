@@ -271,7 +271,7 @@ io.on('connection', async (socket) => {
           .insert([{
             message_id: newMessage.id,
             author_username: data.username,
-            post_type: data.post_type || 'official_signal',
+            post_type: 'signal',
             outcome: 'pending',
             status: 'active'
           }]);
@@ -590,8 +590,8 @@ io.on('connection', async (socket) => {
 
       // Calculate statistics
       const totalSignals = signals.length;
-      const wonSignals = signals.filter(s => s.outcome === 'won').length;
-      const lostSignals = signals.filter(s => s.outcome === 'lost').length;
+      const wonSignals = signals.filter(s => s.outcome === 'win').length;
+      const lostSignals = signals.filter(s => s.outcome === 'loss').length;
       const pendingSignals = signals.filter(s => s.outcome === 'pending').length;
       const winRate = totalSignals > 0 ? ((wonSignals / (wonSignals + lostSignals)) * 100).toFixed(1) : 0;
 
@@ -646,8 +646,8 @@ io.on('connection', async (socket) => {
         }
 
         userStats[author].totalSignals++;
-        if (signal.outcome === 'won') userStats[author].wonSignals++;
-        if (signal.outcome === 'lost') userStats[author].lostSignals++;
+        if (signal.outcome === 'win') userStats[author].wonSignals++;
+        if (signal.outcome === 'loss') userStats[author].lostSignals++;
         userStats[author].totalPips += parseFloat(signal.pips_gained) || 0;
       });
 
