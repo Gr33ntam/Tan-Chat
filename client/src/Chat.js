@@ -78,6 +78,7 @@ function Chat({ onUsernameSet }) {
         onUsernameSet(username);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joined, username, onUsernameSet]);
 
   // Socket listeners
@@ -190,6 +191,7 @@ function Chat({ onUsernameSet }) {
       socket.off('room_error');
       socket.off('my_rooms');
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, userTier]);
 
   // Join room when component mounts or room changes
