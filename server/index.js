@@ -264,17 +264,21 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      // If it's an official post, create metadata
+      // If it's an official signal, create metadata
       if (data.is_official && data.type === 'signal') {
-        await supabase
+        const { error: metaError } = await supabase
           .from('official_posts_metadata')
           .insert([{
             message_id: newMessage.id,
             author_username: data.username,
-            post_type: 'signal',
-            status: 'active',
-            outcome: 'pending'
+            post_type: data.post_type || 'official_signal',
+            outcome: 'pending',
+            status: 'active'
           }]);
+
+        if (metaError) {
+          console.error('Error creating signal metadata:', metaError);
+        }
       }
 
       // Broadcast ONLY to users in the same room
