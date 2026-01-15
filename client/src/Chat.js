@@ -31,6 +31,9 @@ function Chat({ onUsernameSet }) {
   const [isOfficialPost, setIsOfficialPost] = useState(false);
   const [privateRooms, setPrivateRooms] = useState([]);
   const [showPrivateRoomModal, setShowPrivateRoomModal] = useState(false);
+  const [signalOutcomes, setSignalOutcomes] = useState({});
+  const [showOutcomeModal, setShowOutcomeModal] = useState(false);
+  const [selectedSignal, setSelectedSignal] = useState(null);
   const messagesEndRef = useRef(null);
 
   // Signal form state
@@ -46,6 +49,13 @@ function Chat({ onUsernameSet }) {
   const [newRoomData, setNewRoomData] = useState({
     name: '',
     description: ''
+  });
+
+  // Outcome update form state
+  const [outcomeData, setOutcomeData] = useState({
+    outcome: 'won',
+    closePrice: '',
+    closedBy: 'tp'
   });
 
   // Auto-scroll to bottom
@@ -91,6 +101,28 @@ function Chat({ onUsernameSet }) {
       setMessages(prev => prev.filter(msg => msg.id !== data.messageId));
     });
 
+    socket.on('signal_updated', (data) => {
+      setSignalOutcomes(prev => ({
+        ...prev,
+        [data.messageId]: {
+          outcome: data.outcome,
+          closePrice: data.closePrice,
+          pipsGained: data.pipsGained,
+          closedBy: data.closedBy,
+          closedAt: data.closedAt
+        }
+      }));
+    });
+
+    socket.on('signal_update_success', (data) => {
+      alert('✅ Signal updated successfully!');
+      setShowOutcomeModal(false);
+    });
+
+    socket.on('signal_error', (data) => {
+      alert(`❌ ${data.message}`);
+    });
+
     socket.on('room_locked', (data) => {
       alert(`🔒 ${data.message}\n\nUpgrade to unlock this room!`);
       setShowUpgradeModal(true);
@@ -133,6 +165,9 @@ function Chat({ onUsernameSet }) {
       socket.off('previous_messages');
       socket.off('new_message');
       socket.off('message_deleted');
+      socket.off('signal_updated');
+      socket.off('signal_update_success');
+      socket.off('signal_error');
       socket.off('room_locked');
       socket.off('upgrade_success');
       socket.off('upgrade_error');
@@ -174,6 +209,34 @@ function Chat({ onUsernameSet }) {
     if (window.confirm('Are you sure you want to delete this message?')) {
       socket.emit('delete_message', { messageId, username, room: currentRoom });
     }
+  };
+
+  const openOutcomeModal = (message) => {
+    setSelectedSignal(message);
+    const currentOutcome = signalOutcomes[message.id];
+    setOutcomeData({
+      outcome: currentOutcome?.outcome || 'won',
+      closePrice: currentOutcome?.closePrice || '',
+      closedBy: currentOutcome?.closedBy || 'tp'
+    });
+    setShowOutcomeModal(true);
+  };
+
+  const updateSignalOutcome = () => {
+    if (!selectedSignal) return;
+
+    if (!outcomeData.closePrice) {
+      alert('Please enter a close price');
+      return;
+    }
+
+    socket.emit('update_signal_outcome', {
+      messageId: selectedSignal.id,
+      username,
+      outcome: outcomeData.outcome,
+      closePrice: parseFloat(outcomeData.closePrice),
+      closedBy: outcomeData.closedBy
+    });
   };
 
   const sendMessage = () => {
@@ -262,6 +325,7 @@ function Chat({ onUsernameSet }) {
   const switchRoom = (roomId) => {
     setCurrentRoom(roomId);
     setMessages([]);
+    setSignalOutcomes({});
   };
 
   const hasAccessToRoom = (room) => {
@@ -539,7 +603,10 @@ function Chat({ onUsernameSet }) {
                 formatTime={formatTime}
                 isOfficial={msg.is_official}
                 canDelete={msg.username === username}
+                canUpdate={msg.username === username && msg.is_official}
                 onDelete={() => deleteMessage(msg.id)}
+                onUpdateOutcome={() => openOutcomeModal(msg)}
+                outcomeData={signalOutcomes[msg.id]}
               />
             )}
           </div>
@@ -779,6 +846,133 @@ function Chat({ onUsernameSet }) {
           onUpgrade={handleUpgrade}
           suggestedTier={selectedUpgradeTier}
         />
+      )}
+
+      {/* Outcome Update Modal */}
+      {showOutcomeModal && selectedSignal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '500px',
+            width: '90%'
+          }}>
+            <h2 style={{ marginTop: 0 }}>📊 Update Signal Outcome</h2>
+            <p style={{ color: '#666', marginBottom: '20px' }}>
+              {selectedSignal.signal.direction} {selectedSignal.signal.pair}
+            </p>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Outcome:
+              </label>
+              <select
+                value={outcomeData.outcome}
+                onChange={(e) => setOutcomeData({ ...outcomeData, outcome: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '2px solid #ddd',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
+              >
+                <option value="won">✅ Won (Profit)</option>
+                <option value="lost">❌ Lost (Loss)</option>
+                <option value="pending">🟡 Pending (Reset)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Close Price:
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={outcomeData.closePrice}
+                onChange={(e) => setOutcomeData({ ...outcomeData, closePrice: e.target.value })}
+                placeholder="Enter close price"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '2px solid #ddd',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Closed By:
+              </label>
+              <select
+                value={outcomeData.closedBy}
+                onChange={(e) => setOutcomeData({ ...outcomeData, closedBy: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '2px solid #ddd',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
+              >
+                <option value="tp">🎯 Take Profit Hit</option>
+                <option value="sl">🛑 Stop Loss Hit</option>
+                <option value="manual">✋ Manual Close</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={updateSignalOutcome}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px'
+                }}
+              >
+                Update Signal
+              </button>
+              <button
+                onClick={() => setShowOutcomeModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: '#f0f0f0',
+                  color: '#333',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Create Private Room Modal */}
@@ -1060,8 +1254,37 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
 }
 
 // Signal Card Component
-function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDelete, onDelete }) {
+function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDelete, canUpdate, onDelete, onUpdateOutcome, outcomeData }) {
   const isBuy = signal.direction === 'BUY';
+  const outcome = outcomeData?.outcome || 'pending';
+  const pipsGained = outcomeData?.pipsGained || 0;
+  const closedBy = outcomeData?.closedBy;
+
+  const getStatusBadge = () => {
+    switch (outcome) {
+      case 'won':
+        return { text: '✅ Won', bg: '#4CAF50', color: '#fff' };
+      case 'lost':
+        return { text: '❌ Lost', bg: '#f44336', color: '#fff' };
+      default:
+        return { text: '🟡 Pending', bg: '#FF9800', color: '#fff' };
+    }
+  };
+
+  const statusBadge = getStatusBadge();
+
+  const getClosedByText = () => {
+    switch (closedBy) {
+      case 'tp':
+        return '🎯 TP Hit';
+      case 'sl':
+        return '🛑 SL Hit';
+      case 'manual':
+        return '✋ Manual';
+      default:
+        return null;
+    }
+  };
 
   return (
     <div style={{
@@ -1080,7 +1303,7 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
         alignItems: 'center',
         marginBottom: '12px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <div style={{
             fontSize: '22px',
             fontWeight: 'bold',
@@ -1098,6 +1321,18 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
               fontWeight: 'bold'
             }}>
               ⭐ OFFICIAL
+            </span>
+          )}
+          {isOfficial && (
+            <span style={{
+              backgroundColor: statusBadge.bg,
+              color: statusBadge.color,
+              padding: '4px 10px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
+              {statusBadge.text}
             </span>
           )}
         </div>
@@ -1137,6 +1372,32 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
         }}>
           R:R {signal.riskReward}
         </div>
+
+        {isOfficial && outcome !== 'pending' && (
+          <>
+            <div style={{
+              marginTop: '12px',
+              padding: '10px',
+              backgroundColor: outcome === 'won' ? '#E8F5E9' : '#FFEBEE',
+              borderRadius: '8px',
+              border: `2px solid ${outcome === 'won' ? '#4CAF50' : '#f44336'}`
+            }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
+                {outcome === 'won' ? '💰 Profit' : '📉 Loss'}: {Math.abs(pipsGained).toFixed(2)} pips
+              </div>
+              {closedBy && (
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  {getClosedByText()}
+                </div>
+              )}
+              {outcomeData?.closePrice && (
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  Close: {outcomeData.closePrice}
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <div style={{
@@ -1144,9 +1405,29 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
         color: '#666',
         marginTop: '12px',
         borderTop: '1px solid #ccc',
-        paddingTop: '10px'
+        paddingTop: '10px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
       }}>
-        Posted by <strong>{username}</strong>
+        <span>Posted by <strong>{username}</strong></span>
+        {canUpdate && (
+          <button
+            onClick={onUpdateOutcome}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#2196F3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}
+          >
+            📊 Update Outcome
+          </button>
+        )}
       </div>
     </div>
   );
