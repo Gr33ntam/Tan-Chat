@@ -30,7 +30,9 @@ function Account({ username: propUsername, onLogout }) {
     messageCount: 0,
     accountAge: 0
   });
+  // eslint-disable-next-line no-unused-vars
   const [userStats, setUserStats] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [leaderboard, setLeaderboard] = useState([]);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
@@ -43,6 +45,7 @@ function Account({ username: propUsername, onLogout }) {
       loadUserStats();
       loadLeaderboard();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
   useEffect(() => {
@@ -65,6 +68,7 @@ function Account({ username: propUsername, onLogout }) {
       socket.off('user_stats');
       socket.off('leaderboard_data');
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
   const loadUserData = async () => {
@@ -409,6 +413,139 @@ function Account({ username: propUsername, onLogout }) {
             />
           </div>
         </div>
+
+        {/* Trading Statistics */}
+        {userStats && (userData.subscription_tier === 'pro' || userData.subscription_tier === 'premium') && (
+          <div style={{
+            backgroundColor: '#fff',
+            padding: '25px',
+            borderRadius: '12px',
+            marginTop: '20px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          }}>
+            <h2 style={{ margin: '0 0 20px 0', fontSize: '22px' }}>📊 Your Trading Statistics</h2>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+              gap: '15px'
+            }}>
+              <TradingStatCard
+                title="Total Signals"
+                value={userStats.totalSignals}
+                icon="📈"
+                color="#2196F3"
+              />
+              <TradingStatCard
+                title="Won"
+                value={userStats.wonSignals}
+                icon="✅"
+                color="#4CAF50"
+              />
+              <TradingStatCard
+                title="Lost"
+                value={userStats.lostSignals}
+                icon="❌"
+                color="#f44336"
+              />
+              <TradingStatCard
+                title="Pending"
+                value={userStats.pendingSignals}
+                icon="🟡"
+                color="#FF9800"
+              />
+              <TradingStatCard
+                title="Win Rate"
+                value={`${userStats.winRate}%`}
+                icon="🎯"
+                color="#9C27B0"
+              />
+              <TradingStatCard
+                title="Total Pips"
+                value={userStats.totalPips > 0 ? `+${userStats.totalPips}` : userStats.totalPips}
+                icon="💰"
+                color={userStats.totalPips >= 0 ? '#4CAF50' : '#f44336'}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Global Leaderboard */}
+        {leaderboard.length > 0 && (
+          <div style={{
+            backgroundColor: '#fff',
+            padding: '25px',
+            borderRadius: '12px',
+            marginTop: '20px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          }}>
+            <h2 style={{ margin: '0 0 20px 0', fontSize: '22px' }}>🏆 Top Traders Leaderboard</h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
+                    <th style={tableHeaderStyle}>Rank</th>
+                    <th style={tableHeaderStyle}>Trader</th>
+                    <th style={tableHeaderStyle}>Win Rate</th>
+                    <th style={tableHeaderStyle}>Signals</th>
+                    <th style={tableHeaderStyle}>Total Pips</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaderboard.map((trader, index) => (
+                    <tr key={trader.username} style={{
+                      borderBottom: '1px solid #eee',
+                      backgroundColor: trader.username === username ? '#E3F2FD' : (index % 2 === 0 ? '#fff' : '#fafafa')
+                    }}>
+                      <td style={tableCellStyle}>
+                        <span style={{ fontSize: '20px' }}>
+                          {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
+                        </span>
+                      </td>
+                      <td style={tableCellStyle}>
+                        <strong>{trader.username}</strong>
+                        {trader.username === username && (
+                          <span style={{
+                            marginLeft: '8px',
+                            padding: '2px 8px',
+                            backgroundColor: '#2196F3',
+                            color: 'white',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: 'bold'
+                          }}>
+                            YOU
+                          </span>
+                        )}
+                      </td>
+                      <td style={tableCellStyle}>
+                        <span style={{
+                          fontWeight: 'bold',
+                          color: parseFloat(trader.winRate) >= 60 ? '#4CAF50' : parseFloat(trader.winRate) >= 40 ? '#FF9800' : '#f44336'
+                        }}>
+                          {trader.winRate}%
+                        </span>
+                      </td>
+                      <td style={tableCellStyle}>
+                        {trader.totalSignals} ({trader.wonSignals}W / {trader.lostSignals}L)
+                      </td>
+                      <td style={tableCellStyle}>
+                        <span style={{
+                          fontWeight: 'bold',
+                          color: parseFloat(trader.totalPips) >= 0 ? '#4CAF50' : '#f44336'
+                        }}>
+                          {parseFloat(trader.totalPips) > 0 ? '+' : ''}{trader.totalPips}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={{ fontSize: '12px', color: '#999', marginTop: '15px', textAlign: 'center' }}>
+              * Minimum 3 closed signals required to appear on leaderboard
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Upgrade Modal */}
@@ -513,6 +650,39 @@ function StatCard({ title, value, icon, color }) {
     </div>
   );
 }
+
+function TradingStatCard({ title, value, icon, color }) {
+  return (
+    <div style={{
+      backgroundColor: '#f9f9f9',
+      padding: '20px',
+      borderRadius: '8px',
+      border: `2px solid ${color}`,
+      textAlign: 'center'
+    }}>
+      <div style={{ fontSize: '32px', marginBottom: '8px' }}>{icon}</div>
+      <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>
+        {title}
+      </div>
+      <div style={{ fontSize: '24px', fontWeight: 'bold', color: color }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+const tableHeaderStyle = {
+  padding: '12px',
+  textAlign: 'left',
+  fontSize: '14px',
+  fontWeight: 'bold',
+  color: '#666'
+};
+
+const tableCellStyle = {
+  padding: '12px',
+  fontSize: '14px'
+};
 
 function AccessItem({ room, hasAccess }) {
   return (
