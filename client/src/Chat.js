@@ -35,6 +35,10 @@ function Chat({ onUsernameSet }) {
   const [showOutcomeModal, setShowOutcomeModal] = useState(false);
   const [selectedSignal, setSelectedSignal] = useState(null);
   const messagesEndRef = useRef(null);
+  const [showRoomManagementModal, setShowRoomManagementModal] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [roomMembers, setRoomMembers] = useState([]);
+  const [inviteUsername, setInviteUsername] = useState('');
 
   // Signal form state
   const [signalData, setSignalData] = useState({
@@ -80,7 +84,6 @@ function Chat({ onUsernameSet }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joined, username, onUsernameSet]);
-
   // Socket listeners
   useEffect(() => {
     socket.on('user_registered', (data) => {
@@ -175,6 +178,21 @@ function Chat({ onUsernameSet }) {
       setPrivateRooms(data.rooms || []);
     });
 
+    socket.on('room_members', (data) => {
+      setRoomMembers(data.members || []);
+    });
+
+    socket.on('invite_success', (data) => {
+      alert(`✅ ${data.message}`);
+      loadRoomMembers(selectedRoom?.id);
+      setInviteUsername('');
+    });
+
+    socket.on('remove_success', (data) => {
+      alert(`✅ ${data.message}`);
+      loadRoomMembers(selectedRoom?.id);
+    });
+
     return () => {
       socket.off('user_registered');
       socket.off('previous_messages');
@@ -190,10 +208,60 @@ function Chat({ onUsernameSet }) {
       socket.off('room_created');
       socket.off('room_error');
       socket.off('my_rooms');
+      socket.off('room_members');
+      socket.off('invite_success');
+      socket.off('remove_success');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, userTier]);
 
+  // Helper functions for room management
+  const loadRoomMembers = (roomId) => {
+    if (roomId) {
+      socket.emit('get_room_members', { roomId });
+    }
+  };
+
+  const openRoomManagement = (room) => {
+    setSelectedRoom(room);
+    setShowRoomManagementModal(true);
+    loadRoomMembers(room.id);
+  };
+
+  const inviteUser = () => {
+    if (!inviteUsername.trim()) {
+      alert('Please enter a username');
+      return;
+    }
+    socket.emit('invite_to_room', {
+      roomId: selectedRoom.id,
+      inviterUsername: username,
+      inviteeUsername: inviteUsername.trim()
+    });
+  };
+
+  const removeUser = (removeUsername) => {
+    if (window.confirm(`Remove ${removeUsername} from this room?`)) {
+      socket.emit('remove_from_room', {
+        roomId: selectedRoom.id,
+        removerUsername: username,
+        removeUsername: removeUsername
+      });
+    }
+  };
+
+  const leaveRoom = () => {
+    if (window.confirm('Are you sure you want to leave this room?')) {
+      socket.emit('remove_from_room', {
+        roomId: selectedRoom.id,
+        removerUsername: username,
+        removeUsername: username
+      });
+      setShowRoomManagementModal(false);
+      switchRoom('general');
+      loadPrivateRooms();
+    }
+  };
   // Join room when component mounts or room changes
   useEffect(() => {
     if (joined && username) {
@@ -527,27 +595,54 @@ function Chat({ onUsernameSet }) {
         {allRooms.map(room => {
           const hasAccess = room.isPrivate ? true : hasAccessToRoom(room);
           return (
-            <button
-              key={room.id}
-              onClick={() => hasAccess ? switchRoom(room.id) : setShowUpgradeModal(true)}
-              style={{
-                flex: 1,
-                padding: '12px',
-                backgroundColor: currentRoom === room.id ? room.color : '#fff',
-                color: currentRoom === room.id ? '#fff' : hasAccess ? '#333' : '#999',
-                border: `2px solid ${room.color}`,
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: 'bold',
-                cursor: hasAccess ? 'pointer' : 'not-allowed',
-                transition: 'all 0.2s',
-                minWidth: '120px',
-                opacity: hasAccess ? 1 : 0.5,
-                position: 'relative'
-              }}
-            >
-              {room.name} {!hasAccess && '🔒'}
-            </button>
+            <div key={room.id} style={{ flex: 1, minWidth: '120px', position: 'relative' }}>
+              <button
+                onClick={() => hasAccess ? switchRoom(room.id) : setShowUpgradeModal(true)}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  backgroundColor: currentRoom === room.id ? room.color : '#fff',
+                  color: currentRoom === room.id ? '#fff' : hasAccess ? '#333' : '#999',
+                  border: `2px solid ${room.color}`,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  cursor: hasAccess ? 'pointer' : 'not-allowed',
+                  transition: 'all 0.2s',
+                  opacity: hasAccess ? 1 : 0.5
+                }}
+              >
+                {room.name} {!hasAccess && '🔒'}
+              </button>
+              {room.isPrivate && hasAccess && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openRoomManagement(room);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '4px',
+                    right: '4px',
+                    width: '24px',
+                    height: '24px',
+                    padding: 0,
+                    backgroundColor: 'rgba(0,0,0,0.5)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  title="Manage Room"
+                >
+                  ⚙️
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -1033,6 +1128,21 @@ function Chat({ onUsernameSet }) {
               }}
             />
 
+            {/* Room Management Modal */}
+            {showRoomManagementModal && selectedRoom && (
+              <RoomManagementModal
+                room={selectedRoom}
+                username={username}
+                members={roomMembers}
+                onClose={() => setShowRoomManagementModal(false)}
+                onInvite={inviteUser}
+                onRemove={removeUser}
+                onLeave={leaveRoom}
+                inviteUsername={inviteUsername}
+                setInviteUsername={setInviteUsername}
+              />
+            )}
+
             <textarea
               placeholder="Description (optional)"
               value={newRoomData.description}
@@ -1090,10 +1200,24 @@ function Chat({ onUsernameSet }) {
           </div>
         </div>
       )}
+
+      {/* Room Management Modal */}
+      {showRoomManagementModal && selectedRoom && (
+        <RoomManagementModal
+          room={selectedRoom}
+          username={username}
+          members={roomMembers}
+          onClose={() => setShowRoomManagementModal(false)}
+          onInvite={inviteUser}
+          onRemove={removeUser}
+          onLeave={leaveRoom}
+          inviteUsername={inviteUsername}
+          setInviteUsername={setInviteUsername}
+        />
+      )}
     </div>
   );
 }
-
 // Upgrade Modal Component
 function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
   return (
@@ -1445,6 +1569,185 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
             📊 Update Outcome
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Room Management Modal Component
+function RoomManagementModal({ room, username, members, onClose, onInvite, onRemove, onLeave, inviteUsername, setInviteUsername }) {
+  const userRole = members.find(m => m.username === username)?.role || 'member';
+  const isOwnerOrMod = userRole === 'owner' || userRole === 'moderator';
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '30px',
+        maxWidth: '600px',
+        width: '90%',
+        maxHeight: '80vh',
+        overflowY: 'auto'
+      }}>
+        <h2 style={{ marginTop: 0 }}>⚙️ Manage Room</h2>
+        <p style={{ color: '#666', marginBottom: '20px' }}>{room?.name}</p>
+
+        {/* Invite Section */}
+        {isOwnerOrMod && (
+          <div style={{
+            marginBottom: '25px',
+            padding: '20px',
+            backgroundColor: '#E3F2FD',
+            borderRadius: '8px'
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: '15px' }}>➕ Invite User</h3>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <input
+                placeholder="Enter username"
+                value={inviteUsername}
+                onChange={(e) => setInviteUsername(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && onInvite()}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  border: '2px solid #ddd',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              />
+              <button
+                onClick={onInvite}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Invite
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Members List */}
+        <div style={{ marginBottom: '20px' }}>
+          <h3 style={{ marginBottom: '15px' }}>👥 Members ({members.length})</h3>
+          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+            {members.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#999' }}>Loading members...</p>
+            ) : (
+              members.map(member => (
+                <div key={member.username} style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px',
+                  marginBottom: '8px',
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: '8px',
+                  border: member.username === username ? '2px solid #2196F3' : '1px solid #ddd'
+                }}>
+                  <div>
+                    <strong>{member.username}</strong>
+                    {member.username === username && (
+                      <span style={{
+                        marginLeft: '8px',
+                        padding: '2px 8px',
+                        backgroundColor: '#2196F3',
+                        color: 'white',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: 'bold'
+                      }}>
+                        YOU
+                      </span>
+                    )}
+                    <span style={{
+                      marginLeft: '8px',
+                      padding: '2px 8px',
+                      backgroundColor: member.role === 'owner' ? '#9C27B0' : member.role === 'moderator' ? '#FF9800' : '#9E9E9E',
+                      color: 'white',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      fontWeight: 'bold'
+                    }}>
+                      {member.role.toUpperCase()}
+                    </span>
+                  </div>
+                  {isOwnerOrMod && member.role !== 'owner' && member.username !== username && (
+                    <button
+                      onClick={() => onRemove(member.username)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#f44336',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {userRole !== 'owner' && (
+            <button
+              onClick={onLeave}
+              style={{
+                flex: 1,
+                padding: '12px',
+                backgroundColor: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              🚪 Leave Room
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1,
+              padding: '12px',
+              backgroundColor: '#f0f0f0',
+              color: '#333',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );
