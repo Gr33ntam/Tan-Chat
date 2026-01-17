@@ -193,6 +193,11 @@ function Chat({ onUsernameSet }) {
       loadRoomMembers(selectedRoom?.id);
     });
 
+    socket.on('room_members', (data) => {
+      console.log('👥 Received room members:', data);
+      setRoomMembers(data.members || []);
+    });
+
     return () => {
       socket.off('user_registered');
       socket.off('previous_messages');
@@ -217,12 +222,16 @@ function Chat({ onUsernameSet }) {
 
   // Helper functions for room management
   const loadRoomMembers = (roomId) => {
+    console.log('📡 Requesting members for room:', roomId);
     if (roomId) {
       socket.emit('get_room_members', { roomId });
+    } else {
+      console.error('❌ No roomId provided to loadRoomMembers');
     }
   };
 
   const openRoomManagement = (room) => {
+    console.log('🔧 Opening room management for:', room);
     setSelectedRoom(room);
     setShowRoomManagementModal(true);
     loadRoomMembers(room.id);
@@ -1576,9 +1585,15 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
 
 // Room Management Modal Component
 function RoomManagementModal({ room, username, members, onClose, onInvite, onRemove, onLeave, inviteUsername, setInviteUsername }) {
-  const userRole = members.find(m => m.username === username)?.role || 'member';
+  // Debug: log what we're receiving
+  console.log('Room Management Modal - Members:', members);
+  console.log('Current username:', username);
+
+  const userRole = members.find(m => m.username === username)?.role || 'owner'; // Default to owner if not found
   const isOwnerOrMod = userRole === 'owner' || userRole === 'moderator';
 
+  console.log('User role:', userRole);
+  console.log('Is owner or mod:', isOwnerOrMod);
   return (
     <div style={{
       position: 'fixed',
