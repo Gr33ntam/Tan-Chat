@@ -450,6 +450,32 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // Get room members
+  socket.on('get_room_members', async ({ roomId }) => {
+    try {
+      console.log('📡 Backend received get_room_members for:', roomId);
+
+      const { data: members, error } = await supabase
+        .from('room_members')
+        .select('username, role, joined_at')
+        .eq('room_id', roomId)
+        .order('joined_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching room members:', error);
+        socket.emit('room_error', { message: 'Failed to fetch members' });
+        return;
+      }
+
+      console.log('👥 Backend sending members:', members);
+      socket.emit('room_members', { members: members || [] });
+
+    } catch (err) {
+      console.error('Error fetching room members:', err);
+      socket.emit('room_error', { message: 'Failed to fetch members' });
+    }
+  });
+
   // Delete message
   socket.on('delete_message', async ({ messageId, username, room }) => {
     try {
