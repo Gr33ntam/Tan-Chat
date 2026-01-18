@@ -5,10 +5,11 @@ import Admin from './Admin';
 import Account from './Account';
 
 function App() {
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(localStorage.getItem('username') || '');
 
   const handleLogout = () => {
     setUsername('');
+    localStorage.removeItem('username');
     window.location.href = '/';
   };
 
