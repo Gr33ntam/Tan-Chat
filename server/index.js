@@ -392,12 +392,17 @@ io.on('connection', async (socket) => {
   // Remove user from private room
   socket.on('remove_from_room', async ({ roomId, removerUsername, removeUsername }) => {
     try {
-      // Check if remover has permission (owner or moderator)
-      const removerRole = await getUserRoleInRoom(removerUsername, roomId);
+      // Allow users to remove themselves (leave room)
+      const isSelfRemove = removerUsername === removeUsername;
 
-      if (!removerRole || (removerRole !== 'owner' && removerRole !== 'moderator')) {
-        socket.emit('room_error', { message: 'You do not have permission to remove users' });
-        return;
+      if (!isSelfRemove) {
+        // Check if remover has permission to remove others (owner or moderator)
+        const removerRole = await getUserRoleInRoom(removerUsername, roomId);
+
+        if (!removerRole || (removerRole !== 'owner' && removerRole !== 'moderator')) {
+          socket.emit('room_error', { message: 'You do not have permission to remove users' });
+          return;
+        }
       }
 
       // Cannot remove owner
