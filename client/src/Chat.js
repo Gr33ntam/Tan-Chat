@@ -1248,6 +1248,21 @@ function Chat({ onUsernameSet }) {
               ➕ New Room
             </button>
           )}
+          <button
+            onClick={() => window.location.href = '/leaderboard'}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#FF9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+          >
+            🏆 Leaderboard
+          </button>
 
           {pendingInvitations.length > 0 && (
             <button
