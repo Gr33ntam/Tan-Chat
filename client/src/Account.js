@@ -302,6 +302,21 @@ function Account({ username: propUsername, onLogout }) {
             >
               Logout
             </button>
+            <button
+              onClick={() => navigate('/leaderboard')}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#FF9800',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}
+            >
+              🏆 Leaderboard
+            </button>
           </div>
         </div>
 
