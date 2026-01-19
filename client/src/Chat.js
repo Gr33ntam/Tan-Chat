@@ -18,6 +18,660 @@ const TIERS = {
   premium: { name: 'Premium', price: '$19.99/mo', rooms: ['General', 'Forex', 'Crypto', 'Stocks'] }
 };
 
+// Upgrade Modal Component
+function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '30px',
+        maxWidth: '600px',
+        width: '90%',
+        maxHeight: '90vh',
+        overflowY: 'auto'
+      }}>
+        <h2 style={{ marginTop: 0, textAlign: 'center' }}>🚀 Manage Your Plan</h2>
+        <p style={{ textAlign: 'center', color: '#666', marginBottom: '30px' }}>
+          Upgrade or downgrade your subscription
+        </p>
+
+        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          {Object.entries(TIERS).map(([tier, info]) => {
+            const isCurrent = tier === currentTier;
+            const isSuggested = tier === suggestedTier;
+
+            return (
+              <div key={tier} style={{
+                flex: 1,
+                minWidth: '150px',
+                border: isSuggested ? '3px solid #FF9800' : '2px solid #ddd',
+                borderRadius: '12px',
+                padding: '20px',
+                backgroundColor: isCurrent ? '#f0f0f0' : '#fff',
+                position: 'relative'
+              }}>
+                {isSuggested && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '-10px',
+                    right: '10px',
+                    backgroundColor: '#FF9800',
+                    color: 'white',
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    fontWeight: 'bold'
+                  }}>
+                    Recommended
+                  </div>
+                )}
+
+                <h3 style={{ marginTop: 0, textAlign: 'center' }}>
+                  {tier === 'free' ? '🆓' : tier === 'pro' ? '💎' : '👑'} {info.name}
+                </h3>
+                <p style={{
+                  textAlign: 'center',
+                  fontSize: '24px',
+                  fontWeight: 'bold',
+                  margin: '10px 0',
+                  color: '#333'
+                }}>
+                  {info.price}
+                </p>
+
+                <div style={{ marginTop: '15px' }}>
+                  <strong>Access to:</strong>
+                  <ul style={{ paddingLeft: '20px', margin: '10px 0' }}>
+                    {info.rooms.map(room => (
+                      <li key={room}>{room}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {tier === 'pro' && (
+                  <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
+                    📊 Post Trading Signals
+                  </div>
+                )}
+
+                {tier === 'premium' && (
+                  <>
+                    <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
+                      ⭐ Official Signal Badge
+                    </div>
+                    <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                      🔒 Create Private Rooms
+                    </div>
+                  </>
+                )}
+
+                {!isCurrent && (
+                  <button
+                    onClick={() => {
+                      const tierHierarchy = { free: 0, pro: 1, premium: 2 };
+                      const currentLevel = tierHierarchy[currentTier] || 0;
+                      const targetLevel = tierHierarchy[tier] || 0;
+                      const isUpgrade = targetLevel > currentLevel;
+                      const action = isUpgrade ? 'Upgrade' : 'Downgrade';
+
+                      if (window.confirm(`Are you sure you want to ${action.toLowerCase()} to ${info.name}?`)) {
+                        onUpgrade(tier);
+                        onClose(); // Close the modal after upgrade
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      backgroundColor: isSuggested ? '#FF9800' : (tier === 'free' ? '#9E9E9E' : '#4CAF50'),
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      marginTop: '10px'
+                    }}
+                  >
+                    {(() => {
+                      const tierHierarchy = { free: 0, pro: 1, premium: 2 };
+                      const currentLevel = tierHierarchy[currentTier] || 0;
+                      const targetLevel = tierHierarchy[tier] || 0;
+                      return targetLevel > currentLevel ? 'Upgrade' : 'Downgrade';
+                    })()} to {info.name}
+                  </button>
+                )}
+
+                {isCurrent && (
+                  <div style={{
+                    width: '100%',
+                    padding: '10px',
+                    backgroundColor: '#ddd',
+                    color: '#666',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    fontWeight: 'bold',
+                    marginTop: '10px'
+                  }}>
+                    Current Plan
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <p style={{ fontSize: '12px', color: '#999', textAlign: 'center', marginTop: '20px' }}>
+          💳 This is a mock payment. In production, you'd be redirected to Stripe.
+        </p>
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%',
+            padding: '12px',
+            backgroundColor: '#f0f0f0',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginTop: '10px'
+          }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Signal Card Component
+function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDelete, canUpdate, onDelete, onUpdateOutcome, outcomeData }) {
+  const isBuy = signal.direction === 'BUY';
+  const outcome = outcomeData?.outcome || 'pending';
+  const pipsGained = outcomeData?.pipsGained || 0;
+  const closedBy = outcomeData?.closedBy;
+
+  const getStatusBadge = () => {
+    switch (outcome) {
+      case 'win':
+        return { text: '✅ Won', bg: '#4CAF50', color: '#fff' };
+      case 'loss':
+        return { text: '❌ Lost', bg: '#f44336', color: '#fff' };
+      default:
+        return { text: '🟡 Pending', bg: '#FF9800', color: '#fff' };
+    }
+  };
+
+  const statusBadge = getStatusBadge();
+
+  const getClosedByText = () => {
+    switch (closedBy) {
+      case 'tp':
+        return '🎯 TP Hit';
+      case 'sl':
+        return '🛑 SL Hit';
+      case 'manual':
+        return '✋ Manual';
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div style={{
+      border: `3px solid ${isBuy ? '#4CAF50' : '#f44336'}`,
+      borderRadius: '12px',
+      padding: '18px',
+      backgroundColor: isOfficial
+        ? (isBuy ? '#E8F5E9' : '#FFEBEE')
+        : (isBuy ? '#F1F8E9' : '#FCE4EC'),
+      boxShadow: '0 4px 8px rgba(0,0,0,0.15)',
+      ...(isOfficial ? { border: '3px solid #FF9800' } : {})
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '12px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{
+            fontSize: '22px',
+            fontWeight: 'bold',
+            color: isBuy ? '#2E7D32' : '#C62828'
+          }}>
+            {signal.direction} {signal.pair}
+          </div>
+          {isOfficial && (
+            <span style={{
+              backgroundColor: '#FF9800',
+              color: 'white',
+              padding: '4px 10px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
+              ⭐ OFFICIAL
+            </span>
+          )}
+          {isOfficial && (
+            <span style={{
+              backgroundColor: statusBadge.bg,
+              color: statusBadge.color,
+              padding: '4px 10px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
+              {statusBadge.text}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', color: '#666' }}>
+            {formatTime(timestamp)}
+          </span>
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              style={{
+                padding: '4px 8px',
+                backgroundColor: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}
+            >
+              🗑️
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ fontSize: '15px', lineHeight: '1.8' }}>
+        <div><strong>Entry:</strong> {signal.entry}</div>
+        <div><strong>Stop Loss:</strong> {signal.stopLoss}</div>
+        <div><strong>Take Profit:</strong> {signal.takeProfit}</div>
+        <div style={{
+          fontWeight: 'bold',
+          color: '#4CAF50',
+          fontSize: '18px',
+          marginTop: '8px'
+        }}>
+          R:R {signal.riskReward}
+        </div>
+
+        {isOfficial && outcome !== 'pending' && (
+          <>
+            <div style={{
+              marginTop: '12px',
+              padding: '10px',
+              backgroundColor: outcome === 'win' ? '#E8F5E9' : '#FFEBEE',
+              borderRadius: '8px',
+              border: `2px solid ${outcome === 'win' ? '#4CAF50' : '#f44336'}`
+            }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
+                {outcome === 'win' ? '💰 Profit' : '📉 Loss'}: {Math.abs(pipsGained).toFixed(2)} pips
+              </div>
+              {closedBy && (
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  {getClosedByText()}
+                </div>
+              )}
+              {outcomeData?.closePrice && (
+                <div style={{ fontSize: '13px', color: '#666' }}>
+                  Close: {outcomeData.closePrice}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{
+        fontSize: '13px',
+        color: '#666',
+        marginTop: '12px',
+        borderTop: '1px solid #ccc',
+        paddingTop: '10px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <span>Posted by <strong>{username}</strong></span>
+        {canUpdate && (
+          <button
+            onClick={onUpdateOutcome}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#2196F3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}
+          >
+            📊 Update Outcome
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Room Management Modal Component
+function RoomManagementModal({ room, username, members, onClose, onInvite, onRemove, onLeave, inviteUsername, setInviteUsername }) {
+  const userRole = members.find(m => m.username === username)?.role || 'owner';
+  const isOwnerOrMod = userRole === 'owner' || userRole === 'moderator';
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '30px',
+        maxWidth: '600px',
+        width: '90%',
+        maxHeight: '80vh',
+        overflowY: 'auto'
+      }}>
+        <h2 style={{ marginTop: 0 }}>⚙️ Manage Room</h2>
+        <p style={{ color: '#666', marginBottom: '20px' }}>{room?.name}</p>
+
+        {/* Invite Section */}
+        {isOwnerOrMod && (
+          <div style={{
+            marginBottom: '25px',
+            padding: '20px',
+            backgroundColor: '#E3F2FD',
+            borderRadius: '8px'
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: '15px' }}>➕ Invite User</h3>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <input
+                placeholder="Enter username"
+                value={inviteUsername}
+                onChange={(e) => setInviteUsername(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && onInvite()}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  border: '2px solid #ddd',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              />
+              <button
+                onClick={onInvite}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Invite
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Members List */}
+        <div style={{ marginBottom: '20px' }}>
+          <h3 style={{ marginBottom: '15px' }}>👥 Members ({members.length})</h3>
+          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+            {members.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#999' }}>Loading members...</p>
+            ) : (
+              members.map(member => (
+                <div key={member.username} style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px',
+                  marginBottom: '8px',
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: '8px',
+                  border: member.username === username ? '2px solid #2196F3' : '1px solid #ddd'
+                }}>
+                  <div>
+                    <strong>{member.username}</strong>
+                    {member.username === username && (
+                      <span style={{
+                        marginLeft: '8px',
+                        padding: '2px 8px',
+                        backgroundColor: '#2196F3',
+                        color: 'white',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: 'bold'
+                      }}>
+                        YOU
+                      </span>
+                    )}
+                    <span style={{
+                      marginLeft: '8px',
+                      padding: '2px 8px',
+                      backgroundColor: member.role === 'owner' ? '#9C27B0' : member.role === 'moderator' ? '#FF9800' : '#9E9E9E',
+                      color: 'white',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      fontWeight: 'bold'
+                    }}>
+                      {member.role.toUpperCase()}
+                    </span>
+                  </div>
+                  {isOwnerOrMod && member.role !== 'owner' && member.username !== username && (
+                    <button
+                      onClick={() => onRemove(member.username)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#f44336',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {userRole !== 'owner' && (
+            <button
+              onClick={onLeave}
+              style={{
+                flex: 1,
+                padding: '12px',
+                backgroundColor: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              🚪 Leave Room
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1,
+              padding: '12px',
+              backgroundColor: '#f0f0f0',
+              color: '#333',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Invitations Modal Component
+function InvitationsModal({ invitations, onClose, onAccept, onDecline }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000
+    }}>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '30px',
+        maxWidth: '600px',
+        width: '90%',
+        maxHeight: '80vh',
+        overflowY: 'auto'
+      }}>
+        <h2 style={{ marginTop: 0 }}>📨 Room Invitations</h2>
+        <p style={{ color: '#666', marginBottom: '20px' }}>
+          You have {invitations.length} pending {invitations.length === 1 ? 'invitation' : 'invitations'}
+        </p>
+
+        {invitations.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+            No pending invitations
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            {invitations.map(invitation => (
+              <div key={invitation.id} style={{
+                border: '2px solid #ddd',
+                borderRadius: '12px',
+                padding: '20px',
+                backgroundColor: '#f9f9f9'
+              }}>
+                <div style={{ marginBottom: '15px' }}>
+                  <h3 style={{ margin: '0 0 5px 0', color: '#673AB7' }}>
+                    🔒 {invitation.private_rooms.name}
+                  </h3>
+                  {invitation.private_rooms.description && (
+                    <p style={{ margin: '5px 0', color: '#666', fontSize: '14px' }}>
+                      {invitation.private_rooms.description}
+                    </p>
+                  )}
+                  <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: '#999' }}>
+                    Invited by <strong>{invitation.inviter_username}</strong>
+                  </p>
+                  <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#999' }}>
+                    {new Date(invitation.created_at).toLocaleString()}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    onClick={() => onAccept(invitation.id)}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      backgroundColor: '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: '14px'
+                    }}
+                  >
+                    ✅ Accept
+                  </button>
+                  <button
+                    onClick={() => onDecline(invitation.id)}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      backgroundColor: '#f44336',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: '14px'
+                    }}
+                  >
+                    ❌ Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%',
+            padding: '12px',
+            backgroundColor: '#f0f0f0',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginTop: '20px'
+          }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Chat({ onUsernameSet }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -87,6 +741,7 @@ function Chat({ onUsernameSet }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joined, username, onUsernameSet]);
+
   // Socket listeners
   useEffect(() => {
     socket.on('user_registered', (data) => {
@@ -151,7 +806,6 @@ function Chat({ onUsernameSet }) {
     });
 
     socket.on('upgrade_success', (data) => {
-      // Determine if upgrade or downgrade
       const tierHierarchy = { free: 0, pro: 1, premium: 2 };
       const oldLevel = tierHierarchy[userTier] || 0;
       const newLevel = tierHierarchy[data.tier] || 0;
@@ -195,6 +849,7 @@ function Chat({ onUsernameSet }) {
       alert(`✅ ${data.message}`);
       loadRoomMembers(selectedRoom?.id);
     });
+
     socket.on('new_invitation', (data) => {
       if (data.inviteeUsername === username) {
         loadPendingInvitations();
@@ -223,7 +878,6 @@ function Chat({ onUsernameSet }) {
     });
 
     socket.on('room_members', (data) => {
-      console.log('👥 Received room members:', data);
       setRoomMembers(data.members || []);
     });
 
@@ -256,16 +910,12 @@ function Chat({ onUsernameSet }) {
 
   // Helper functions for room management
   const loadRoomMembers = (roomId) => {
-    console.log('📡 Requesting members for room:', roomId);
     if (roomId) {
       socket.emit('get_room_members', { roomId });
-    } else {
-      console.error('❌ No roomId provided to loadRoomMembers');
     }
   };
 
   const openRoomManagement = (room) => {
-    console.log('🔧 Opening room management for:', room);
     setSelectedRoom(room);
     setShowRoomManagementModal(true);
     loadRoomMembers(room.id);
@@ -322,6 +972,7 @@ function Chat({ onUsernameSet }) {
       loadPendingInvitations();
     }
   };
+
   // Join room when component mounts or room changes
   useEffect(() => {
     if (joined && username) {
@@ -1224,21 +1875,6 @@ function Chat({ onUsernameSet }) {
               }}
             />
 
-            {/* Room Management Modal */}
-            {showRoomManagementModal && selectedRoom && (
-              <RoomManagementModal
-                room={selectedRoom}
-                username={username}
-                members={roomMembers}
-                onClose={() => setShowRoomManagementModal(false)}
-                onInvite={inviteUser}
-                onRemove={removeUser}
-                onLeave={leaveRoom}
-                inviteUsername={inviteUsername}
-                setInviteUsername={setInviteUsername}
-              />
-            )}
-
             <textarea
               placeholder="Description (optional)"
               value={newRoomData.description}
@@ -1311,682 +1947,18 @@ function Chat({ onUsernameSet }) {
           setInviteUsername={setInviteUsername}
         />
       )}
+
+      {/* Invitations Modal */}
+      {showInvitationsModal && (
+        <InvitationsModal
+          invitations={pendingInvitations}
+          onClose={() => setShowInvitationsModal(false)}
+          onAccept={acceptInvitation}
+          onDecline={declineInvitation}
+        />
+      )}
     </div>
   );
 }
-{/* Invitations Modal */ }
-{
-  showInvitationsModal && (
-    <InvitationsModal
-      invitations={pendingInvitations}
-      onClose={() => setShowInvitationsModal(false)}
-      onAccept={acceptInvitation}
-      onDecline={declineInvitation}
-    />
-  )
-}
 
-{/* Room Management Modal */ }
-{
-  showRoomManagementModal && selectedRoom && (
-    // Upgrade Modal Component
-    function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
-      return (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: '#fff',
-            borderRadius: '16px',
-            padding: '30px',
-            maxWidth: '600px',
-            width: '90%',
-            maxHeight: '90vh',
-            overflowY: 'auto'
-          }}>
-            <h2 style={{ marginTop: 0, textAlign: 'center' }}>🚀 Manage Your Plan</h2>
-            <p style={{ textAlign: 'center', color: '#666', marginBottom: '30px' }}>
-              Upgrade or downgrade your subscription
-            </p>
-
-            <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
-              {Object.entries(TIERS).map(([tier, info]) => {
-                const isCurrent = tier === currentTier;
-                const isSuggested = tier === suggestedTier;
-
-                return (
-                  <div key={tier} style={{
-                    flex: 1,
-                    minWidth: '150px',
-                    border: isSuggested ? '3px solid #FF9800' : '2px solid #ddd',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    backgroundColor: isCurrent ? '#f0f0f0' : '#fff',
-                    position: 'relative'
-                  }}>
-                    {isSuggested && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '-10px',
-                        right: '10px',
-                        backgroundColor: '#FF9800',
-                        color: 'white',
-                        padding: '4px 12px',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        fontWeight: 'bold'
-                      }}>
-                        Recommended
-                      </div>
-                    )}
-
-                    <h3 style={{ marginTop: 0, textAlign: 'center' }}>
-                      {tier === 'free' ? '🆓' : tier === 'pro' ? '💎' : '👑'} {info.name}
-                    </h3>
-                    <p style={{
-                      textAlign: 'center',
-                      fontSize: '24px',
-                      fontWeight: 'bold',
-                      margin: '10px 0',
-                      color: '#333'
-                    }}>
-                      {info.price}
-                    </p>
-
-                    <div style={{ marginTop: '15px' }}>
-                      <strong>Access to:</strong>
-                      <ul style={{ paddingLeft: '20px', margin: '10px 0' }}>
-                        {info.rooms.map(room => (
-                          <li key={room}>{room}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {tier === 'pro' && (
-                      <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-                        📊 Post Trading Signals
-                      </div>
-                    )}
-
-                    {tier === 'premium' && (
-                      <>
-                        <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-                          ⭐ Official Signal Badge
-                        </div>
-                        <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
-                          🔒 Create Private Rooms
-                        </div>
-                      </>
-                    )}
-
-                    {!isCurrent && (
-                      <button
-                        onClick={() => {
-                          const tierHierarchy = { free: 0, pro: 1, premium: 2 };
-                          const currentLevel = tierHierarchy[currentTier] || 0;
-                          const targetLevel = tierHierarchy[tier] || 0;
-                          const isUpgrade = targetLevel > currentLevel;
-                          const action = isUpgrade ? 'Upgrade' : 'Downgrade';
-
-                          if (window.confirm(`Are you sure you want to ${action.toLowerCase()} to ${info.name}?`)) {
-                            onUpgrade(tier);
-                            onClose(); // Close the modal after upgrade
-                          }
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          backgroundColor: isSuggested ? '#FF9800' : (tier === 'free' ? '#9E9E9E' : '#4CAF50'),
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer',
-                          fontWeight: 'bold',
-                          marginTop: '10px'
-                        }}
-                      >
-                        {(() => {
-                          const tierHierarchy = { free: 0, pro: 1, premium: 2 };
-                          const currentLevel = tierHierarchy[currentTier] || 0;
-                          const targetLevel = tierHierarchy[tier] || 0;
-                          return targetLevel > currentLevel ? 'Upgrade' : 'Downgrade';
-                        })()} to {info.name}
-                      </button>
-                    )}
-
-                    {isCurrent && (
-                      <div style={{
-                        width: '100%',
-                        padding: '10px',
-                        backgroundColor: '#ddd',
-                        color: '#666',
-                        borderRadius: '8px',
-                        textAlign: 'center',
-                        fontWeight: 'bold',
-                        marginTop: '10px'
-                      }}>
-                        Current Plan
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <p style={{ fontSize: '12px', color: '#999', textAlign: 'center', marginTop: '20px' }}>
-              💳 This is a mock payment. In production, you'd be redirected to Stripe.
-            </p>
-
-            <button
-              onClick={onClose}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#f0f0f0',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-                marginTop: '10px'
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-// Signal Card Component
-function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDelete, canUpdate, onDelete, onUpdateOutcome, outcomeData }) {
-    const isBuy = signal.direction === 'BUY';
-    const outcome = outcomeData?.outcome || 'pending';
-    const pipsGained = outcomeData?.pipsGained || 0;
-    const closedBy = outcomeData?.closedBy;
-
-    const getStatusBadge = () => {
-      switch (outcome) {
-        case 'win':
-          return { text: '✅ Won', bg: '#4CAF50', color: '#fff' };
-        case 'loss':
-          return { text: '❌ Lost', bg: '#f44336', color: '#fff' };
-        default:
-          return { text: '🟡 Pending', bg: '#FF9800', color: '#fff' };
-      }
-    };
-
-    const statusBadge = getStatusBadge();
-
-    const getClosedByText = () => {
-      switch (closedBy) {
-        case 'tp':
-          return '🎯 TP Hit';
-        case 'sl':
-          return '🛑 SL Hit';
-        case 'manual':
-          return '✋ Manual';
-        default:
-          return null;
-      }
-    };
-
-    return (
-      <div style={{
-        border: `3px solid ${isBuy ? '#4CAF50' : '#f44336'}`,
-        borderRadius: '12px',
-        padding: '18px',
-        backgroundColor: isOfficial
-          ? (isBuy ? '#E8F5E9' : '#FFEBEE')
-          : (isBuy ? '#F1F8E9' : '#FCE4EC'),
-        boxShadow: '0 4px 8px rgba(0,0,0,0.15)',
-        ...(isOfficial ? { border: '3px solid #FF9800' } : {})
-      }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '12px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <div style={{
-              fontSize: '22px',
-              fontWeight: 'bold',
-              color: isBuy ? '#2E7D32' : '#C62828'
-            }}>
-              {signal.direction} {signal.pair}
-            </div>
-            {isOfficial && (
-              <span style={{
-                backgroundColor: '#FF9800',
-                color: 'white',
-                padding: '4px 10px',
-                borderRadius: '12px',
-                fontSize: '12px',
-                fontWeight: 'bold'
-              }}>
-                ⭐ OFFICIAL
-              </span>
-            )}
-            {isOfficial && (
-              <span style={{
-                backgroundColor: statusBadge.bg,
-                color: statusBadge.color,
-                padding: '4px 10px',
-                borderRadius: '12px',
-                fontSize: '12px',
-                fontWeight: 'bold'
-              }}>
-                {statusBadge.text}
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#666' }}>
-              {formatTime(timestamp)}
-            </span>
-            {canDelete && (
-              <button
-                onClick={onDelete}
-                style={{
-                  padding: '4px 8px',
-                  backgroundColor: '#f44336',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  fontWeight: 'bold'
-                }}
-              >
-                🗑️
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div style={{ fontSize: '15px', lineHeight: '1.8' }}>
-          <div><strong>Entry:</strong> {signal.entry}</div>
-          <div><strong>Stop Loss:</strong> {signal.stopLoss}</div>
-          <div><strong>Take Profit:</strong> {signal.takeProfit}</div>
-          <div style={{
-            fontWeight: 'bold',
-            color: '#4CAF50',
-            fontSize: '18px',
-            marginTop: '8px'
-          }}>
-            R:R {signal.riskReward}
-          </div>
-
-          {isOfficial && outcome !== 'pending' && (
-            <>
-              <div style={{
-                marginTop: '12px',
-                padding: '10px',
-                backgroundColor: outcome === 'win' ? '#E8F5E9' : '#FFEBEE',
-                borderRadius: '8px',
-                border: `2px solid ${outcome === 'win' ? '#4CAF50' : '#f44336'}`
-              }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-                  {outcome === 'win' ? '💰 Profit' : '📉 Loss'}: {Math.abs(pipsGained).toFixed(2)} pips
-                </div>
-                {closedBy && (
-                  <div style={{ fontSize: '13px', color: '#666' }}>
-                    {getClosedByText()}
-                  </div>
-                )}
-                {outcomeData?.closePrice && (
-                  <div style={{ fontSize: '13px', color: '#666' }}>
-                    Close: {outcomeData.closePrice}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div style={{
-          fontSize: '13px',
-          color: '#666',
-          marginTop: '12px',
-          borderTop: '1px solid #ccc',
-          paddingTop: '10px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <span>Posted by <strong>{username}</strong></span>
-          {canUpdate && (
-            <button
-              onClick={onUpdateOutcome}
-              style={{
-                padding: '6px 12px',
-                backgroundColor: '#2196F3',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '12px',
-                fontWeight: 'bold'
-              }}
-            >
-              📊 Update Outcome
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Room Management Modal Component
-  function RoomManagementModal({ room, username, members, onClose, onInvite, onRemove, onLeave, inviteUsername, setInviteUsername }) {
-    // Debug: log what we're receiving
-    console.log('Room Management Modal - Members:', members);
-    console.log('Current username:', username);
-
-    const userRole = members.find(m => m.username === username)?.role || 'owner'; // Default to owner if not found
-    const isOwnerOrMod = userRole === 'owner' || userRole === 'moderator';
-
-    console.log('User role:', userRole);
-    console.log('Is owner or mod:', isOwnerOrMod);
-    return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000
-      }}>
-        <div style={{
-          backgroundColor: '#fff',
-          borderRadius: '16px',
-          padding: '30px',
-          maxWidth: '600px',
-          width: '90%',
-          maxHeight: '80vh',
-          overflowY: 'auto'
-        }}>
-          <h2 style={{ marginTop: 0 }}>⚙️ Manage Room</h2>
-          <p style={{ color: '#666', marginBottom: '20px' }}>{room?.name}</p>
-
-          {/* Invite Section */}
-          {isOwnerOrMod && (
-            <div style={{
-              marginBottom: '25px',
-              padding: '20px',
-              backgroundColor: '#E3F2FD',
-              borderRadius: '8px'
-            }}>
-              <h3 style={{ marginTop: 0, marginBottom: '15px' }}>➕ Invite User</h3>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <input
-                  placeholder="Enter username"
-                  value={inviteUsername}
-                  onChange={(e) => setInviteUsername(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && onInvite()}
-                  style={{
-                    flex: 1,
-                    padding: '10px',
-                    border: '2px solid #ddd',
-                    borderRadius: '6px',
-                    fontSize: '14px'
-                  }}
-                />
-                <button
-                  onClick={onInvite}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: '#4CAF50',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Invite
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Members List */}
-          <div style={{ marginBottom: '20px' }}>
-            <h3 style={{ marginBottom: '15px' }}>👥 Members ({members.length})</h3>
-            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {members.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#999' }}>Loading members...</p>
-              ) : (
-                members.map(member => (
-                  <div key={member.username} style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '12px',
-                    marginBottom: '8px',
-                    backgroundColor: '#f5f5f5',
-                    borderRadius: '8px',
-                    border: member.username === username ? '2px solid #2196F3' : '1px solid #ddd'
-                  }}>
-                    <div>
-                      <strong>{member.username}</strong>
-                      {member.username === username && (
-                        <span style={{
-                          marginLeft: '8px',
-                          padding: '2px 8px',
-                          backgroundColor: '#2196F3',
-                          color: 'white',
-                          borderRadius: '8px',
-                          fontSize: '11px',
-                          fontWeight: 'bold'
-                        }}>
-                          YOU
-                        </span>
-                      )}
-                      <span style={{
-                        marginLeft: '8px',
-                        padding: '2px 8px',
-                        backgroundColor: member.role === 'owner' ? '#9C27B0' : member.role === 'moderator' ? '#FF9800' : '#9E9E9E',
-                        color: 'white',
-                        borderRadius: '8px',
-                        fontSize: '11px',
-                        fontWeight: 'bold'
-                      }}>
-                        {member.role.toUpperCase()}
-                      </span>
-                    </div>
-                    {isOwnerOrMod && member.role !== 'owner' && member.username !== username && (
-                      <button
-                        onClick={() => onRemove(member.username)}
-                        style={{
-                          padding: '6px 12px',
-                          backgroundColor: '#f44336',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: '10px' }}>
-            {userRole !== 'owner' && (
-              <button
-                onClick={onLeave}
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  backgroundColor: '#f44336',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold'
-                }}
-              >
-                🚪 Leave Room
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              style={{
-                flex: 1,
-                padding: '12px',
-                backgroundColor: '#f0f0f0',
-                color: '#333',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Invitations Modal Component
-  function InvitationsModal({ invitations, onClose, onAccept, onDecline }) {
-    return (
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000
-      }}>
-        <div style={{
-          backgroundColor: '#fff',
-          borderRadius: '16px',
-          padding: '30px',
-          maxWidth: '600px',
-          width: '90%',
-          maxHeight: '80vh',
-          overflowY: 'auto'
-        }}>
-          <h2 style={{ marginTop: 0 }}>📨 Room Invitations</h2>
-          <p style={{ color: '#666', marginBottom: '20px' }}>
-            You have {invitations.length} pending {invitations.length === 1 ? 'invitation' : 'invitations'}
-          </p>
-
-          {invitations.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-              No pending invitations
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              {invitations.map(invitation => (
-                <div key={invitation.id} style={{
-                  border: '2px solid #ddd',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  backgroundColor: '#f9f9f9'
-                }}>
-                  <div style={{ marginBottom: '15px' }}>
-                    <h3 style={{ margin: '0 0 5px 0', color: '#673AB7' }}>
-                      🔒 {invitation.private_rooms.name}
-                    </h3>
-                    {invitation.private_rooms.description && (
-                      <p style={{ margin: '5px 0', color: '#666', fontSize: '14px' }}>
-                        {invitation.private_rooms.description}
-                      </p>
-                    )}
-                    <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: '#999' }}>
-                      Invited by <strong>{invitation.inviter_username}</strong>
-                    </p>
-                    <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#999' }}>
-                      {new Date(invitation.created_at).toLocaleString()}
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button
-                      onClick={() => onAccept(invitation.id)}
-                      style={{
-                        flex: 1,
-                        padding: '10px',
-                        backgroundColor: '#4CAF50',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        fontWeight: 'bold',
-                        fontSize: '14px'
-                      }}
-                    >
-                      ✅ Accept
-                    </button>
-                    <button
-                      onClick={() => onDecline(invitation.id)}
-                      style={{
-                        flex: 1,
-                        padding: '10px',
-                        backgroundColor: '#f44336',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        fontWeight: 'bold',
-                        fontSize: '14px'
-                      }}
-                    >
-                      ❌ Decline
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <button
-            onClick={onClose}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: '#f0f0f0',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              marginTop: '20px'
-            }}
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  export default Chat;
+export default Chat;
