@@ -1337,6 +1337,7 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
 
                       if (window.confirm(`Are you sure you want to ${action.toLowerCase()} to ${info.name}?`)) {
                         onUpgrade(tier);
+                        onClose(); // Close the modal after upgrade
                       }
                     }}
                     style={{
