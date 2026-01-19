@@ -366,26 +366,168 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      // Add member
-      await supabase
-        .from('room_members')
+      // Check if there's already a pending invitation
+      const { data: existingInvite } = await supabase
+        .from('room_invitations')
+        .select('*')
+        .eq('room_id', roomId)
+        .eq('invitee_username', inviteeUsername)
+        .eq('status', 'pending')
+        .single();
+
+      if (existingInvite) {
+        socket.emit('room_error', { message: 'User already has a pending invitation' });
+        return;
+      }
+
+      // Create pending invitation
+      const { data: invitation, error } = await supabase
+        .from('room_invitations')
         .insert([{
           room_id: roomId,
-          username: inviteeUsername,
-          role: 'member'
-        }]);
+          inviter_username: inviterUsername,
+          invitee_username: inviteeUsername,
+          status: 'pending'
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating invitation:', error);
+        socket.emit('room_error', { message: 'Failed to send invitation' });
+        return;
+      }
 
       socket.emit('invite_success', {
         roomId,
         username: inviteeUsername,
-        message: `${inviteeUsername} has been invited to the room`
+        message: `Invitation sent to ${inviteeUsername}`
       });
 
-      console.log(`${inviteeUsername} invited to room ${roomId} by ${inviterUsername}`);
+      // Notify the invitee
+      io.emit('new_invitation', {
+        inviteeUsername: inviteeUsername,
+        invitation: invitation
+      });
+
+      console.log(`Invitation sent to ${inviteeUsername} for room ${roomId} by ${inviterUsername}`);
 
     } catch (err) {
       console.error('Error inviting user:', err);
       socket.emit('room_error', { message: 'Failed to invite user' });
+    }
+  });
+
+  // Get pending invitations for a user
+  socket.on('get_my_invitations', async ({ username }) => {
+    try {
+      const { data: invitations, error } = await supabase
+        .from('room_invitations')
+        .select('*, private_rooms(room_id, name, description, owner_username)')
+        .eq('invitee_username', username)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching invitations:', error);
+        socket.emit('invitations_error', { message: 'Failed to fetch invitations' });
+        return;
+      }
+
+      socket.emit('my_invitations', { invitations: invitations || [] });
+
+    } catch (err) {
+      console.error('Error fetching invitations:', err);
+      socket.emit('invitations_error', { message: 'Failed to fetch invitations' });
+    }
+  });
+
+  // Accept room invitation
+  socket.on('accept_invitation', async ({ invitationId, username }) => {
+    try {
+      // Get the invitation
+      const { data: invitation, error: fetchError } = await supabase
+        .from('room_invitations')
+        .select('*')
+        .eq('id', invitationId)
+        .eq('invitee_username', username)
+        .eq('status', 'pending')
+        .single();
+
+      if (fetchError || !invitation) {
+        socket.emit('room_error', { message: 'Invitation not found' });
+        return;
+      }
+
+      // Add user to room_members
+      const { error: memberError } = await supabase
+        .from('room_members')
+        .insert([{
+          room_id: invitation.room_id,
+          username: username,
+          role: 'member'
+        }]);
+
+      if (memberError) {
+        console.error('Error adding member:', memberError);
+        socket.emit('room_error', { message: 'Failed to join room' });
+        return;
+      }
+
+      // Update invitation status
+      await supabase
+        .from('room_invitations')
+        .update({ status: 'accepted', updated_at: new Date().toISOString() })
+        .eq('id', invitationId);
+
+      socket.emit('invitation_accepted', {
+        roomId: invitation.room_id,
+        message: 'Invitation accepted! You can now access the room.'
+      });
+
+      // Refresh user's rooms
+      socket.emit('refresh_rooms');
+
+      console.log(`${username} accepted invitation to room ${invitation.room_id}`);
+
+    } catch (err) {
+      console.error('Error accepting invitation:', err);
+      socket.emit('room_error', { message: 'Failed to accept invitation' });
+    }
+  });
+
+  // Decline room invitation
+  socket.on('decline_invitation', async ({ invitationId, username }) => {
+    try {
+      // Verify invitation belongs to user
+      const { data: invitation, error: fetchError } = await supabase
+        .from('room_invitations')
+        .select('*')
+        .eq('id', invitationId)
+        .eq('invitee_username', username)
+        .eq('status', 'pending')
+        .single();
+
+      if (fetchError || !invitation) {
+        socket.emit('room_error', { message: 'Invitation not found' });
+        return;
+      }
+
+      // Update invitation status
+      await supabase
+        .from('room_invitations')
+        .update({ status: 'declined', updated_at: new Date().toISOString() })
+        .eq('id', invitationId);
+
+      socket.emit('invitation_declined', {
+        message: 'Invitation declined'
+      });
+
+      console.log(`${username} declined invitation to room ${invitation.room_id}`);
+
+    } catch (err) {
+      console.error('Error declining invitation:', err);
+      socket.emit('room_error', { message: 'Failed to decline invitation' });
     }
   });
 
