@@ -58,6 +58,7 @@ function Account({ username: propUsername, onLogout }) {
     return () => {
       socket.off('upgrade_success');
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
   const loadUserData = async () => {
