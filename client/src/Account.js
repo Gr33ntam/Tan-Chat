@@ -15,12 +15,6 @@ const TIERS = {
   premium: { name: 'Premium', price: '$19.99/mo', icon: '👑', color: '#9C27B0' }
 };
 
-const AVATAR_OPTIONS = [
-  '👤', '😀', '😎', '🤓', '👨‍💼', '👩‍💼', '👨‍💻', '👩‍💻',
-  '🧑‍🚀', '👨‍🎨', '👩‍🎨', '🦸', '🦹', '🧙', '🧛', '🧟',
-  '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼'
-];
-
 function Account({ username: propUsername, onLogout }) {
   const navigate = useNavigate();
   const username = propUsername || localStorage.getItem('username');
@@ -28,22 +22,28 @@ function Account({ username: propUsername, onLogout }) {
   const [userData, setUserData] = useState(null);
   const [stats, setStats] = useState({
     messageCount: 0,
-    accountAge: 0
+    accountAge: 0,
+    // Trading stats
+    totalSignals: 0,
+    wonSignals: 0,
+    lostSignals: 0,
+    pendingSignals: 0,
+    winRate: 0,
+    totalPips: 0,
+    avgRR: 0,
+    bestTrade: null,
+    worstTrade: null,
+    avgPipsPerWin: 0,
+    avgPipsPerLoss: 0,
+    currentStreak: { type: null, count: 0 }
   });
-  // eslint-disable-next-line no-unused-vars
-  const [userStats, setUserStats] = useState(null);
-  // eslint-disable-next-line no-unused-vars
-  const [leaderboard, setLeaderboard] = useState([]);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (username) {
       loadUserData();
       loadStats();
-      loadUserStats();
-      loadLeaderboard();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
@@ -55,20 +55,9 @@ function Account({ username: propUsername, onLogout }) {
       }
     });
 
-    socket.on('user_stats', (data) => {
-      setUserStats(data.stats);
-    });
-
-    socket.on('leaderboard_data', (data) => {
-      setLeaderboard(data.leaderboard || []);
-    });
-
     return () => {
       socket.off('upgrade_success');
-      socket.off('user_stats');
-      socket.off('leaderboard_data');
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
   const loadUserData = async () => {
@@ -92,11 +81,13 @@ function Account({ username: propUsername, onLogout }) {
 
   const loadStats = async () => {
     try {
+      // Get message count
       const { count } = await supabase
         .from('messages')
         .select('*', { count: 'exact', head: true })
         .eq('username', username);
 
+      // Get account age
       const { data: userData } = await supabase
         .from('users')
         .select('created_at')
@@ -107,57 +98,120 @@ function Account({ username: propUsername, onLogout }) {
         ? Math.floor((Date.now() - new Date(userData.created_at)) / (1000 * 60 * 60 * 24))
         : 0;
 
+      // Get trading statistics from official_posts_metadata
+      const { data: signalMetadata, error: signalError } = await supabase
+        .from('official_posts_metadata')
+        .select('*')
+        .eq('author_username', username)
+        .order('created_at', { ascending: true });
+
+      if (signalError) {
+        console.error('Error loading signal metadata:', signalError);
+      }
+
+      // Calculate trading stats
+      let tradingStats = {
+        totalSignals: 0,
+        wonSignals: 0,
+        lostSignals: 0,
+        pendingSignals: 0,
+        winRate: 0,
+        totalPips: 0,
+        avgRR: 0,
+        bestTrade: null,
+        worstTrade: null,
+        avgPipsPerWin: 0,
+        avgPipsPerLoss: 0,
+        currentStreak: { type: null, count: 0 }
+      };
+
+      if (signalMetadata && signalMetadata.length > 0) {
+        const wins = [];
+        const losses = [];
+        let totalRR = 0;
+        let rrCount = 0;
+        let streakType = null;
+        let streakCount = 0;
+
+        signalMetadata.forEach(signal => {
+          tradingStats.totalSignals++;
+
+          if (signal.outcome === 'win') {
+            tradingStats.wonSignals++;
+            tradingStats.totalPips += signal.pips_gained || 0;
+            wins.push(signal.pips_gained || 0);
+
+            // Update streak
+            if (streakType === 'win') {
+              streakCount++;
+            } else {
+              streakType = 'win';
+              streakCount = 1;
+            }
+          } else if (signal.outcome === 'loss') {
+            tradingStats.lostSignals++;
+            tradingStats.totalPips += signal.pips_gained || 0; // pips_gained is negative for losses
+            losses.push(signal.pips_gained || 0);
+
+            // Update streak
+            if (streakType === 'loss') {
+              streakCount++;
+            } else {
+              streakType = 'loss';
+              streakCount = 1;
+            }
+          } else {
+            tradingStats.pendingSignals++;
+            // Pending doesn't break streak, skip
+          }
+
+          // Calculate average R:R from signal data if available
+          if (signal.risk_reward) {
+            totalRR += parseFloat(signal.risk_reward);
+            rrCount++;
+          }
+        });
+
+        // Calculate averages
+        const completedSignals = tradingStats.wonSignals + tradingStats.lostSignals;
+        tradingStats.winRate = completedSignals > 0
+          ? ((tradingStats.wonSignals / completedSignals) * 100).toFixed(1)
+          : 0;
+
+        tradingStats.avgRR = rrCount > 0 ? (totalRR / rrCount).toFixed(2) : 0;
+
+        tradingStats.avgPipsPerWin = wins.length > 0
+          ? (wins.reduce((a, b) => a + b, 0) / wins.length).toFixed(1)
+          : 0;
+
+        tradingStats.avgPipsPerLoss = losses.length > 0
+          ? (losses.reduce((a, b) => a + b, 0) / losses.length).toFixed(1)
+          : 0;
+
+        // Find best and worst trades
+        if (wins.length > 0) {
+          tradingStats.bestTrade = Math.max(...wins).toFixed(1);
+        }
+        if (losses.length > 0) {
+          tradingStats.worstTrade = Math.min(...losses).toFixed(1);
+        }
+
+        // Set current streak
+        tradingStats.currentStreak = { type: streakType, count: streakCount };
+      }
+
       setStats({
         messageCount: count || 0,
-        accountAge: accountAge
+        accountAge: accountAge,
+        ...tradingStats
       });
     } catch (err) {
       console.error('Error loading stats:', err);
     }
   };
 
-  const loadUserStats = () => {
-    if (username) {
-      socket.emit('get_user_stats', { username });
-    }
-  };
-
-  const loadLeaderboard = () => {
-    socket.emit('get_leaderboard');
-  };
-
   const handleUpgrade = (tier) => {
     socket.emit('upgrade_subscription', { username, tier });
-  };
-
-  const handleAvatarChange = async (newAvatar) => {
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update({ avatar: newAvatar })
-        .eq('username', username);
-
-      if (error) {
-        console.error('Error updating avatar:', error);
-        alert('Failed to update avatar');
-      } else {
-        setUserData({ ...userData, avatar: newAvatar });
-        setShowAvatarModal(false);
-      }
-    } catch (err) {
-      console.error('Error:', err);
-      alert('Failed to update avatar');
-    }
-  };
-
-  const handleLogoutClick = () => {
-    if (window.confirm('Are you sure you want to logout?')) {
-      localStorage.removeItem('username');
-      if (onLogout) {
-        onLogout();
-      }
-      navigate('/');
-    }
   };
 
   if (!username) {
@@ -201,7 +255,6 @@ function Account({ username: propUsername, onLogout }) {
   }
 
   const currentTier = TIERS[userData.subscription_tier] || TIERS.free;
-  const userAvatar = userData.avatar || '👤';
 
   return (
     <div style={{
@@ -210,7 +263,7 @@ function Account({ username: propUsername, onLogout }) {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       padding: '20px'
     }}>
-      <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         {/* Header */}
         <div style={{
           backgroundColor: '#fff',
@@ -220,58 +273,34 @@ function Account({ username: propUsername, onLogout }) {
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '15px'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <div style={{ position: 'relative' }}>
-              <div style={{
-                width: '100px',
-                height: '100px',
-                borderRadius: '50%',
-                backgroundColor: '#e0e0e0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '60px',
-                border: '4px solid ' + currentTier.color,
-                cursor: 'pointer'
-              }}
-                onClick={() => setShowAvatarModal(true)}
-              >
-                {userAvatar}
-              </div>
-              <button
-                onClick={() => setShowAvatarModal(true)}
-                style={{
-                  position: 'absolute',
-                  bottom: '0',
-                  right: '0',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  backgroundColor: '#2196F3',
-                  color: 'white',
-                  border: '2px solid white',
-                  cursor: 'pointer',
-                  fontSize: '16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                ✏️
-              </button>
-            </div>
-            <div>
-              <h1 style={{ margin: 0, color: '#333', fontSize: '32px' }}>
-                My Account
-              </h1>
-              <p style={{ margin: '10px 0 0 0', color: '#666', fontSize: '16px' }}>
-                Welcome back, <strong>{username}</strong>!
-              </p>
-            </div>
+          <div>
+            <h1 style={{ margin: 0, color: '#333', fontSize: '32px' }}>
+              👤 My Account
+            </h1>
+            <p style={{ margin: '10px 0 0 0', color: '#666', fontSize: '16px' }}>
+              Welcome back, <strong>{username}</strong>!
+            </p>
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => navigate('/leaderboard')}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#FF9800',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}
+            >
+              🏆 Leaderboard
+            </button>
             <button
               onClick={() => navigate('/')}
               style={{
@@ -288,7 +317,7 @@ function Account({ username: propUsername, onLogout }) {
               💬 Chat
             </button>
             <button
-              onClick={handleLogoutClick}
+              onClick={onLogout}
               style={{
                 padding: '10px 20px',
                 backgroundColor: '#f44336',
@@ -302,21 +331,6 @@ function Account({ username: propUsername, onLogout }) {
             >
               Logout
             </button>
-            <button
-              onClick={() => navigate('/leaderboard')}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: '#FF9800',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-                fontSize: '14px'
-              }}
-            >
-              🏆 Leaderboard
-            </button>
           </div>
         </div>
 
@@ -329,7 +343,7 @@ function Account({ username: propUsername, onLogout }) {
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
           borderLeft: `6px solid ${currentTier.color}`
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
             <div>
               <h2 style={{ margin: 0, fontSize: '24px' }}>Current Subscription</h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '15px' }}>
@@ -377,7 +391,7 @@ function Account({ username: propUsername, onLogout }) {
           </div>
         </div>
 
-        {/* Stats Grid */}
+        {/* Basic Stats Grid */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
@@ -404,6 +418,111 @@ function Account({ username: propUsername, onLogout }) {
           />
         </div>
 
+        {/* Trading Performance Section */}
+        {stats.totalSignals > 0 && (
+          <>
+            <div style={{
+              backgroundColor: '#fff',
+              padding: '25px',
+              borderRadius: '12px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              marginBottom: '20px'
+            }}>
+              <h2 style={{ margin: '0 0 20px 0', fontSize: '24px' }}>📊 Your Trading Statistics</h2>
+
+              {/* Main Trading Stats */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '15px',
+                marginBottom: '25px'
+              }}>
+                <TradingStatCard
+                  label="Total Signals"
+                  value={stats.totalSignals}
+                  icon="📈"
+                  color="#2196F3"
+                />
+                <TradingStatCard
+                  label="Won"
+                  value={stats.wonSignals}
+                  icon="✅"
+                  color="#4CAF50"
+                />
+                <TradingStatCard
+                  label="Lost"
+                  value={stats.lostSignals}
+                  icon="❌"
+                  color="#f44336"
+                />
+                <TradingStatCard
+                  label="Pending"
+                  value={stats.pendingSignals}
+                  icon="🟡"
+                  color="#FF9800"
+                />
+                <TradingStatCard
+                  label="Win Rate"
+                  value={`${stats.winRate}%`}
+                  icon="🎯"
+                  color="#9C27B0"
+                />
+                <TradingStatCard
+                  label="Total Pips"
+                  value={stats.totalPips > 0 ? `+${stats.totalPips.toFixed(1)}` : stats.totalPips.toFixed(1)}
+                  icon="💰"
+                  color={stats.totalPips >= 0 ? '#4CAF50' : '#f44336'}
+                />
+              </div>
+
+              {/* Advanced Stats */}
+              <h3 style={{ margin: '25px 0 15px 0', fontSize: '20px', color: '#666' }}>Advanced Metrics</h3>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '15px'
+              }}>
+                <TradingStatCard
+                  label="Avg Risk:Reward"
+                  value={stats.avgRR}
+                  icon="⚖️"
+                  color="#673AB7"
+                />
+                <TradingStatCard
+                  label="Best Trade"
+                  value={stats.bestTrade ? `+${stats.bestTrade} pips` : 'N/A'}
+                  icon="🌟"
+                  color="#4CAF50"
+                />
+                <TradingStatCard
+                  label="Worst Trade"
+                  value={stats.worstTrade ? `${stats.worstTrade} pips` : 'N/A'}
+                  icon="📉"
+                  color="#f44336"
+                />
+                <TradingStatCard
+                  label="Avg Win"
+                  value={stats.avgPipsPerWin > 0 ? `+${stats.avgPipsPerWin} pips` : 'N/A'}
+                  icon="📊"
+                  color="#4CAF50"
+                />
+                <TradingStatCard
+                  label="Avg Loss"
+                  value={stats.avgPipsPerLoss !== 0 ? `${stats.avgPipsPerLoss} pips` : 'N/A'}
+                  icon="📉"
+                  color="#f44336"
+                />
+                <TradingStatCard
+                  label="Current Streak"
+                  value={stats.currentStreak.type ? `${stats.currentStreak.count} ${stats.currentStreak.type}${stats.currentStreak.count > 1 ? 's' : ''}` : 'N/A'}
+                  icon={stats.currentStreak.type === 'win' ? '🔥' : stats.currentStreak.type === 'loss' ? '❄️' : '➖'}
+                  color={stats.currentStreak.type === 'win' ? '#4CAF50' : stats.currentStreak.type === 'loss' ? '#f44336' : '#9E9E9E'}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Access Info */}
         <div style={{
           backgroundColor: '#fff',
@@ -428,139 +547,6 @@ function Account({ username: propUsername, onLogout }) {
             />
           </div>
         </div>
-
-        {/* Trading Statistics */}
-        {userStats && (userData.subscription_tier === 'pro' || userData.subscription_tier === 'premium') && (
-          <div style={{
-            backgroundColor: '#fff',
-            padding: '25px',
-            borderRadius: '12px',
-            marginTop: '20px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-          }}>
-            <h2 style={{ margin: '0 0 20px 0', fontSize: '22px' }}>📊 Your Trading Statistics</h2>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-              gap: '15px'
-            }}>
-              <TradingStatCard
-                title="Total Signals"
-                value={userStats.totalSignals}
-                icon="📈"
-                color="#2196F3"
-              />
-              <TradingStatCard
-                title="Won"
-                value={userStats.wonSignals}
-                icon="✅"
-                color="#4CAF50"
-              />
-              <TradingStatCard
-                title="Lost"
-                value={userStats.lostSignals}
-                icon="❌"
-                color="#f44336"
-              />
-              <TradingStatCard
-                title="Pending"
-                value={userStats.pendingSignals}
-                icon="🟡"
-                color="#FF9800"
-              />
-              <TradingStatCard
-                title="Win Rate"
-                value={`${userStats.winRate}%`}
-                icon="🎯"
-                color="#9C27B0"
-              />
-              <TradingStatCard
-                title="Total Pips"
-                value={userStats.totalPips > 0 ? `+${userStats.totalPips}` : userStats.totalPips}
-                icon="💰"
-                color={userStats.totalPips >= 0 ? '#4CAF50' : '#f44336'}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Global Leaderboard */}
-        {leaderboard.length > 0 && (
-          <div style={{
-            backgroundColor: '#fff',
-            padding: '25px',
-            borderRadius: '12px',
-            marginTop: '20px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-          }}>
-            <h2 style={{ margin: '0 0 20px 0', fontSize: '22px' }}>🏆 Top Traders Leaderboard</h2>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
-                    <th style={tableHeaderStyle}>Rank</th>
-                    <th style={tableHeaderStyle}>Trader</th>
-                    <th style={tableHeaderStyle}>Win Rate</th>
-                    <th style={tableHeaderStyle}>Signals</th>
-                    <th style={tableHeaderStyle}>Total Pips</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaderboard.map((trader, index) => (
-                    <tr key={trader.username} style={{
-                      borderBottom: '1px solid #eee',
-                      backgroundColor: trader.username === username ? '#E3F2FD' : (index % 2 === 0 ? '#fff' : '#fafafa')
-                    }}>
-                      <td style={tableCellStyle}>
-                        <span style={{ fontSize: '20px' }}>
-                          {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`}
-                        </span>
-                      </td>
-                      <td style={tableCellStyle}>
-                        <strong>{trader.username}</strong>
-                        {trader.username === username && (
-                          <span style={{
-                            marginLeft: '8px',
-                            padding: '2px 8px',
-                            backgroundColor: '#2196F3',
-                            color: 'white',
-                            borderRadius: '8px',
-                            fontSize: '11px',
-                            fontWeight: 'bold'
-                          }}>
-                            YOU
-                          </span>
-                        )}
-                      </td>
-                      <td style={tableCellStyle}>
-                        <span style={{
-                          fontWeight: 'bold',
-                          color: parseFloat(trader.winRate) >= 60 ? '#4CAF50' : parseFloat(trader.winRate) >= 40 ? '#FF9800' : '#f44336'
-                        }}>
-                          {trader.winRate}%
-                        </span>
-                      </td>
-                      <td style={tableCellStyle}>
-                        {trader.totalSignals} ({trader.wonSignals}W / {trader.lostSignals}L)
-                      </td>
-                      <td style={tableCellStyle}>
-                        <span style={{
-                          fontWeight: 'bold',
-                          color: parseFloat(trader.totalPips) >= 0 ? '#4CAF50' : '#f44336'
-                        }}>
-                          {parseFloat(trader.totalPips) > 0 ? '+' : ''}{trader.totalPips}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p style={{ fontSize: '12px', color: '#999', marginTop: '15px', textAlign: 'center' }}>
-              * Minimum 3 closed signals required to appear on leaderboard
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Upgrade Modal */}
@@ -570,73 +556,6 @@ function Account({ username: propUsername, onLogout }) {
           onClose={() => setShowUpgradeModal(false)}
           onUpgrade={handleUpgrade}
         />
-      )}
-
-      {/* Avatar Selection Modal */}
-      {showAvatarModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: '#fff',
-            borderRadius: '16px',
-            padding: '30px',
-            maxWidth: '500px',
-            width: '90%',
-            maxHeight: '80vh',
-            overflowY: 'auto'
-          }}>
-            <h2 style={{ marginTop: 0, textAlign: 'center' }}>Choose Your Avatar</h2>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(6, 1fr)',
-              gap: '10px',
-              marginBottom: '20px'
-            }}>
-              {AVATAR_OPTIONS.map((avatar, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleAvatarChange(avatar)}
-                  style={{
-                    width: '60px',
-                    height: '60px',
-                    fontSize: '32px',
-                    border: userAvatar === avatar ? '3px solid #2196F3' : '2px solid #ddd',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    backgroundColor: userAvatar === avatar ? '#E3F2FD' : '#fff',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  {avatar}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowAvatarModal(false)}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#f0f0f0',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );
@@ -666,18 +585,18 @@ function StatCard({ title, value, icon, color }) {
   );
 }
 
-function TradingStatCard({ title, value, icon, color }) {
+function TradingStatCard({ label, value, icon, color }) {
   return (
     <div style={{
-      backgroundColor: '#f9f9f9',
       padding: '20px',
+      backgroundColor: '#f9f9f9',
       borderRadius: '8px',
-      border: `2px solid ${color}`,
-      textAlign: 'center'
+      border: `2px solid ${color}20`,
+      borderLeft: `4px solid ${color}`
     }}>
-      <div style={{ fontSize: '32px', marginBottom: '8px' }}>{icon}</div>
-      <div style={{ fontSize: '12px', color: '#666', marginBottom: '5px' }}>
-        {title}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <span style={{ fontSize: '24px' }}>{icon}</span>
+        <span style={{ fontSize: '13px', color: '#666', fontWeight: '500' }}>{label}</span>
       </div>
       <div style={{ fontSize: '24px', fontWeight: 'bold', color: color }}>
         {value}
@@ -685,19 +604,6 @@ function TradingStatCard({ title, value, icon, color }) {
     </div>
   );
 }
-
-const tableHeaderStyle = {
-  padding: '12px',
-  textAlign: 'left',
-  fontSize: '14px',
-  fontWeight: 'bold',
-  color: '#666'
-};
-
-const tableCellStyle = {
-  padding: '12px',
-  fontSize: '14px'
-};
 
 function AccessItem({ room, hasAccess }) {
   return (
