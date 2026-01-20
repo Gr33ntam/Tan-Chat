@@ -28,10 +28,12 @@ function SignalHistory() {
         if (username) {
             loadSignals();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [username]);
 
     useEffect(() => {
         applyFilters();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [signals, outcomeFilter, pairFilter, dateFilter, sortBy]);
 
     const loadSignals = async () => {
