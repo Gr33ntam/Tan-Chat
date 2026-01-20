@@ -303,6 +303,21 @@ function Account({ username: propUsername, onLogout }) {
               🏆 Leaderboard
             </button>
             <button
+              onClick={() => navigate('/signal-history')}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#673AB7',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}
+            >
+              📊 Signal History
+            </button>
+            <button
               onClick={() => navigate('/')}
               style={{
                 padding: '10px 20px',
