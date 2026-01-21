@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import PerformanceCharts from './PerformanceCharts';
 import io from 'socket.io-client';
 import { createClient } from '@supabase/supabase-js';
 import { useNavigate } from 'react-router-dom';
@@ -39,7 +40,7 @@ function Account({ username: propUsername, onLogout }) {
   });
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [loading, setLoading] = useState(true);
-
+  const [signalMetadata, setSignalMetadata] = useState([]);  // ADD THIS
   useEffect(() => {
     if (username) {
       loadUserData();
@@ -206,6 +207,7 @@ function Account({ username: propUsername, onLogout }) {
         accountAge: accountAge,
         ...tradingStats
       });
+      setSignalMetadata(signalMetadata || []);  // ADD THIS LINE
     } catch (err) {
       console.error('Error loading stats:', err);
     }
@@ -445,6 +447,11 @@ function Account({ username: propUsername, onLogout }) {
               marginBottom: '20px'
             }}>
               <h2 style={{ margin: '0 0 20px 0', fontSize: '24px' }}>📊 Your Trading Statistics</h2>
+
+              {/* Performance Charts */}
+              {stats.totalSignals > 0 && (
+                <PerformanceCharts stats={stats} signalHistory={signalMetadata} />
+              )}
 
               {/* Main Trading Stats */}
               <div style={{
