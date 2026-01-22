@@ -1,224 +1,249 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useNavigate } from 'react-router-dom';
-import io from 'socket.io-client';
-
-const socket = io('https://tan-chat.onrender.com');
+import { LineChart, Line, PieChart, Pie, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell, ResponsiveContainer } from 'recharts';
 
 const supabase = createClient(
     process.env.REACT_APP_SUPABASE_URL,
     process.env.REACT_APP_SUPABASE_ANON_KEY
 );
 
-function Leaderboard() {
+const COLORS = ['#4CAF50', '#f44336', '#FF9800'];
+
+function Analytics() {
     const navigate = useNavigate();
-    const [leaderboardData, setLeaderboardData] = useState([]);
+    const username = localStorage.getItem('username');
+
     const [loading, setLoading] = useState(true);
-    const [timeFilter, setTimeFilter] = useState('all');
-    const [sortBy, setSortBy] = useState('winRate');
-    const [minSignals] = useState(5);
-    const [lastUpdate, setLastUpdate] = useState(null);
-
-    useEffect(() => {
-        loadLeaderboard();
-
-        // Real-time updates when signals are updated
-        socket.on('signal_updated', () => {
-            console.log('Signal updated, refreshing leaderboard...');
-            loadLeaderboard();
-        });
-
-        return () => {
-            socket.off('signal_updated');
-        };
-    }, [timeFilter]);
+    const [stats, setStats] = useState({
+        totalSignals: 0,
+        won: 0,
+        lost: 0,
+        pending: 0,
+        winRate: 0,
+        totalPips: 0,
+        bestPair: '-',
+        worstPair: '-',
+        currentStreak: 0,
+        streakType: 'none'
+    });
+    const [signals, setSignals] = useState([]);
+    const [timelineData, setTimelineData] = useState([]);
+    const [pairPerformance, setPairPerformance] = useState([]);
+    const [dateFilter, setDateFilter] = useState('all');
+    const [outcomeFilter, setOutcomeFilter] = useState('all');
 
     const calculatePips = (direction, entry, closePrice) => {
         if (!entry || !closePrice) return 0;
-        
-        const pips = direction === 'BUY' 
-            ? (closePrice - entry) 
+        const pips = direction === 'BUY'
+            ? (closePrice - entry)
             : (entry - closePrice);
-        
-        // For most forex pairs, multiply by 10000 (0.0001 = 1 pip)
-        // For JPY pairs, multiply by 100 (0.01 = 1 pip)
-        // For simplicity, we'll use 10000 for all pairs
         return pips * 10000;
     };
 
-    const loadLeaderboard = async () => {
+    const loadAnalytics = useCallback(async () => {
         setLoading(true);
         try {
-            let dateFilter = null;
-            if (timeFilter === 'week') {
-                dateFilter = new Date();
-                dateFilter.setDate(dateFilter.getDate() - 7);
-            } else if (timeFilter === 'month') {
-                dateFilter = new Date();
-                dateFilter.setMonth(dateFilter.getMonth() - 1);
+            let dateFilterObj = null;
+            if (dateFilter === 'week') {
+                dateFilterObj = new Date();
+                dateFilterObj.setDate(dateFilterObj.getDate() - 7);
+            } else if (dateFilter === 'month') {
+                dateFilterObj = new Date();
+                dateFilterObj.setMonth(dateFilterObj.getMonth() - 1);
             }
 
-            // Get official signals with metadata
             let query = supabase
                 .from('messages')
-                .select(`
-                    id,
-                    username,
-                    signal,
-                    timestamp,
-                    created_at
-                `)
+                .select('*')
+                .eq('username', username)
                 .eq('is_official', true)
-                .eq('type', 'signal');
+                .eq('type', 'signal')
+                .order('created_at', { ascending: true });
 
-            if (dateFilter) {
-                query = query.gte('created_at', dateFilter.toISOString());
+            if (dateFilterObj) {
+                query = query.gte('created_at', dateFilterObj.toISOString());
             }
 
             const { data: messages, error: messagesError } = await query;
 
             if (messagesError) {
-                console.error('Error loading messages:', messagesError);
+                console.error('Error loading signals:', messagesError);
                 setLoading(false);
                 return;
             }
 
-            // Get metadata for these signals
             const messageIds = messages.map(m => m.id);
-            const { data: metadata, error: metadataError } = await supabase
+            const { data: metadata } = await supabase
                 .from('official_posts_metadata')
                 .select('*')
                 .in('message_id', messageIds);
 
-            if (metadataError) {
-                console.error('Error loading metadata:', metadataError);
-            }
-
-            // Create metadata map
             const metadataMap = {};
             (metadata || []).forEach(meta => {
                 metadataMap[meta.message_id] = meta;
             });
 
-            // Get user tiers
-            const usernames = [...new Set(messages.map(m => m.username))];
-            const { data: users } = await supabase
-                .from('users')
-                .select('username, subscription_tier')
-                .in('username', usernames);
-
-            const tierMap = {};
-            (users || []).forEach(user => {
-                tierMap[user.username] = user.subscription_tier;
-            });
-
-            // Group by author and calculate stats
-            const statsMap = {};
+            let won = 0, lost = 0, pending = 0;
+            let totalPips = 0;
+            const pairStats = {};
+            const processedSignals = [];
+            let cumulativePips = 0;
+            const timeline = [];
 
             messages.forEach(msg => {
-                const author = msg.username;
                 const meta = metadataMap[msg.id];
+                const pair = msg.signal.pair;
 
-                if (!statsMap[author]) {
-                    statsMap[author] = {
-                        username: author,
-                        tier: tierMap[author] || 'free',
-                        totalSignals: 0,
-                        won: 0,
-                        lost: 0,
-                        pending: 0,
-                        totalPips: 0,
-                        signals: []
-                    };
-                }
-
-                statsMap[author].totalSignals++;
-                statsMap[author].signals.push({ ...msg, metadata: meta });
+                let outcome = 'pending';
+                let pips = 0;
 
                 if (meta) {
-                    if (meta.outcome === 'win') {
-                        statsMap[author].won++;
-                        const pips = calculatePips(
+                    outcome = meta.outcome;
+                    if (outcome === 'win' || outcome === 'loss') {
+                        pips = calculatePips(
                             msg.signal.direction,
                             msg.signal.entry,
                             meta.close_price
                         );
-                        statsMap[author].totalPips += pips;
-                    } else if (meta.outcome === 'loss') {
-                        statsMap[author].lost++;
-                        const pips = calculatePips(
-                            msg.signal.direction,
-                            msg.signal.entry,
-                            meta.close_price
-                        );
-                        statsMap[author].totalPips += pips;
+                        totalPips += pips;
+                        cumulativePips += pips;
+
+                        if (!pairStats[pair]) {
+                            pairStats[pair] = { won: 0, lost: 0, pips: 0 };
+                        }
+                        if (outcome === 'win') {
+                            won++;
+                            pairStats[pair].won++;
+                        } else {
+                            lost++;
+                            pairStats[pair].lost++;
+                        }
+                        pairStats[pair].pips += pips;
+
+                        timeline.push({
+                            date: new Date(meta.closed_at || msg.created_at).toLocaleDateString(),
+                            pips: parseFloat(cumulativePips.toFixed(1)),
+                            outcome
+                        });
                     } else {
-                        statsMap[author].pending++;
+                        pending++;
                     }
-                } else {
-                    statsMap[author].pending++;
                 }
+
+                processedSignals.push({
+                    ...msg,
+                    metadata: meta,
+                    outcome,
+                    pips
+                });
             });
 
-            // Convert to array and calculate win rates
-            const leaderboard = Object.values(statsMap)
-                .filter(user => (user.won + user.lost) >= minSignals)
-                .map(user => ({
-                    ...user,
-                    winRate: user.won + user.lost > 0
-                        ? ((user.won / (user.won + user.lost)) * 100).toFixed(1)
-                        : 0,
-                    completedSignals: user.won + user.lost
-                }));
+            const pairArray = Object.entries(pairStats).map(([pair, data]) => ({
+                pair,
+                ...data,
+                winRate: data.won + data.lost > 0
+                    ? ((data.won / (data.won + data.lost)) * 100).toFixed(1)
+                    : 0
+            }));
 
-            setLeaderboardData(leaderboard);
-            setLastUpdate(new Date());
+            const bestPair = pairArray.sort((a, b) => b.pips - a.pips)[0];
+            const worstPair = pairArray.sort((a, b) => a.pips - b.pips)[0];
+
+            let currentStreak = 0;
+            let streakType = 'none';
+            const completedSignals = processedSignals.filter(s => s.outcome !== 'pending').reverse();
+
+            if (completedSignals.length > 0) {
+                const lastOutcome = completedSignals[0].outcome;
+                streakType = lastOutcome;
+
+                for (const signal of completedSignals) {
+                    if (signal.outcome === lastOutcome) {
+                        currentStreak++;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            setStats({
+                totalSignals: messages.length,
+                won,
+                lost,
+                pending,
+                winRate: won + lost > 0 ? ((won / (won + lost)) * 100).toFixed(1) : 0,
+                totalPips: totalPips.toFixed(1),
+                bestPair: bestPair ? `${bestPair.pair} (+${bestPair.pips.toFixed(1)})` : '-',
+                worstPair: worstPair ? `${worstPair.pair} (${worstPair.pips.toFixed(1)})` : '-',
+                currentStreak,
+                streakType
+            });
+
+            setSignals(processedSignals);
+            setTimelineData(timeline);
+            setPairPerformance(pairArray.slice(0, 10));
+
         } catch (err) {
-            console.error('Error:', err);
+            console.error('Error loading analytics:', err);
         }
         setLoading(false);
-    };
+    }, [username, dateFilter]);
 
-    const sortLeaderboard = (data) => {
-        const sorted = [...data];
-
-        switch (sortBy) {
-            case 'winRate':
-                return sorted.sort((a, b) => {
-                    const winRateDiff = parseFloat(b.winRate) - parseFloat(a.winRate);
-                    if (winRateDiff !== 0) return winRateDiff;
-                    return b.completedSignals - a.completedSignals;
-                });
-            case 'totalSignals':
-                return sorted.sort((a, b) => b.totalSignals - a.totalSignals);
-            case 'totalPips':
-                return sorted.sort((a, b) => b.totalPips - a.totalPips);
-            default:
-                return sorted;
+    useEffect(() => {
+        if (!username) {
+            navigate('/');
+            return;
         }
+        loadAnalytics();
+    }, [username, loadAnalytics, navigate]);
+
+    const exportToCSV = () => {
+        const filteredSignals = getFilteredSignals();
+
+        const csvContent = [
+            ['Date', 'Pair', 'Direction', 'Entry', 'Stop Loss', 'Take Profit', 'Outcome', 'Close Price', 'Pips'].join(','),
+            ...filteredSignals.map(signal => [
+                new Date(signal.created_at).toLocaleDateString(),
+                signal.signal.pair,
+                signal.signal.direction,
+                signal.signal.entry,
+                signal.signal.stopLoss,
+                signal.signal.takeProfit,
+                signal.outcome,
+                signal.metadata?.close_price || '-',
+                signal.pips.toFixed(1)
+            ].join(','))
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${username}_trading_history_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
     };
 
-    const getRankEmoji = (index) => {
-        switch (index) {
-            case 0: return '🥇';
-            case 1: return '🥈';
-            case 2: return '🥉';
-            default: return `#${index + 1}`;
-        }
+    const getFilteredSignals = () => {
+        return signals.filter(signal => {
+            if (outcomeFilter !== 'all' && signal.outcome !== outcomeFilter) {
+                return false;
+            }
+            return true;
+        });
     };
 
-    const getTierBadge = (tier) => {
-        switch (tier) {
-            case 'premium':
-                return { emoji: '👑', text: 'Premium', color: '#9C27B0' };
-            case 'pro':
-                return { emoji: '💎', text: 'Pro', color: '#4CAF50' };
-            default:
-                return null;
-        }
-    };
+    const pieData = [
+        { name: 'Won', value: stats.won },
+        { name: 'Lost', value: stats.lost },
+        { name: 'Pending', value: stats.pending }
+    ].filter(d => d.value > 0);
 
-    const sortedData = sortLeaderboard(leaderboardData);
+    const filteredSignals = getFilteredSignals();
+
+    if (!username) {
+        return null;
+    }
 
     return (
         <div style={{
@@ -227,8 +252,7 @@ function Leaderboard() {
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             padding: '20px'
         }}>
-            <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                {/* Header */}
+            <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
                 <div style={{
                     backgroundColor: '#fff',
                     padding: '30px',
@@ -243,23 +267,18 @@ function Leaderboard() {
                 }}>
                     <div>
                         <h1 style={{ margin: 0, color: '#333', fontSize: '32px' }}>
-                            🏆 Leaderboard
+                            📊 Trading Analytics
                         </h1>
                         <p style={{ margin: '10px 0 0 0', color: '#666', fontSize: '16px' }}>
-                            Top signal providers ranked by performance
+                            Performance dashboard for <strong>{username}</strong>
                         </p>
-                        {lastUpdate && (
-                            <p style={{ margin: '5px 0 0 0', color: '#999', fontSize: '12px' }}>
-                                Last updated: {lastUpdate.toLocaleTimeString()}
-                            </p>
-                        )}
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
                         <button
-                            onClick={loadLeaderboard}
+                            onClick={() => navigate('/account')}
                             style={{
                                 padding: '10px 20px',
-                                backgroundColor: '#4CAF50',
+                                backgroundColor: '#2196F3',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '8px',
@@ -268,13 +287,13 @@ function Leaderboard() {
                                 fontSize: '14px'
                             }}
                         >
-                            🔄 Refresh
+                            👤 Account
                         </button>
                         <button
                             onClick={() => navigate('/')}
                             style={{
                                 padding: '10px 20px',
-                                backgroundColor: '#2196F3',
+                                backgroundColor: '#4CAF50',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '8px',
@@ -288,304 +307,353 @@ function Leaderboard() {
                     </div>
                 </div>
 
-                {/* Filters */}
                 <div style={{
                     backgroundColor: '#fff',
                     padding: '20px',
                     borderRadius: '12px',
                     marginBottom: '20px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    display: 'flex',
+                    gap: '15px',
+                    flexWrap: 'wrap',
+                    alignItems: 'center'
                 }}>
-                    <div style={{
-                        display: 'flex',
-                        gap: '15px',
-                        marginBottom: '15px',
-                        flexWrap: 'wrap'
-                    }}>
-                        <div>
-                            <label style={{
-                                display: 'block',
-                                marginBottom: '5px',
-                                fontWeight: 'bold',
+                    <div>
+                        <label style={{
+                            display: 'block',
+                            marginBottom: '5px',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            color: '#666'
+                        }}>
+                            Time Period:
+                        </label>
+                        <select
+                            value={dateFilter}
+                            onChange={(e) => setDateFilter(e.target.value)}
+                            style={{
+                                padding: '10px',
+                                border: '2px solid #ddd',
+                                borderRadius: '8px',
                                 fontSize: '14px',
-                                color: '#666'
-                            }}>
-                                Time Period:
-                            </label>
-                            <select
-                                value={timeFilter}
-                                onChange={(e) => setTimeFilter(e.target.value)}
-                                style={{
-                                    padding: '10px',
-                                    border: '2px solid #ddd',
-                                    borderRadius: '8px',
-                                    fontSize: '14px',
-                                    cursor: 'pointer',
-                                    minWidth: '150px'
-                                }}
-                            >
-                                <option value="all">All Time</option>
-                                <option value="month">This Month</option>
-                                <option value="week">This Week</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label style={{
-                                display: 'block',
-                                marginBottom: '5px',
-                                fontWeight: 'bold',
-                                fontSize: '14px',
-                                color: '#666'
-                            }}>
-                                Sort By:
-                            </label>
-                            <select
-                                value={sortBy}
-                                onChange={(e) => setSortBy(e.target.value)}
-                                style={{
-                                    padding: '10px',
-                                    border: '2px solid #ddd',
-                                    borderRadius: '8px',
-                                    fontSize: '14px',
-                                    cursor: 'pointer',
-                                    minWidth: '150px'
-                                }}
-                            >
-                                <option value="winRate">Win Rate</option>
-                                <option value="totalSignals">Total Signals</option>
-                                <option value="totalPips">Total Pips</option>
-                            </select>
-                        </div>
+                                cursor: 'pointer',
+                                minWidth: '150px'
+                            }}
+                        >
+                            <option value="all">All Time</option>
+                            <option value="month">Last 30 Days</option>
+                            <option value="week">Last 7 Days</option>
+                        </select>
                     </div>
 
-                    <p style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        color: '#999'
-                    }}>
-                        * Minimum {minSignals} completed signals required to appear on leaderboard
-                    </p>
+                    <div>
+                        <label style={{
+                            display: 'block',
+                            marginBottom: '5px',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            color: '#666'
+                        }}>
+                            Filter History:
+                        </label>
+                        <select
+                            value={outcomeFilter}
+                            onChange={(e) => setOutcomeFilter(e.target.value)}
+                            style={{
+                                padding: '10px',
+                                border: '2px solid #ddd',
+                                borderRadius: '8px',
+                                fontSize: '14px',
+                                cursor: 'pointer',
+                                minWidth: '150px'
+                            }}
+                        >
+                            <option value="all">All Outcomes</option>
+                            <option value="win">Wins Only</option>
+                            <option value="loss">Losses Only</option>
+                            <option value="pending">Pending Only</option>
+                        </select>
+                    </div>
+
+                    <button
+                        onClick={exportToCSV}
+                        disabled={filteredSignals.length === 0}
+                        style={{
+                            padding: '10px 20px',
+                            backgroundColor: filteredSignals.length > 0 ? '#FF9800' : '#ccc',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: filteredSignals.length > 0 ? 'pointer' : 'not-allowed',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            marginTop: '20px'
+                        }}
+                    >
+                        📥 Export to CSV
+                    </button>
                 </div>
 
-                {/* Leaderboard Table */}
-                <div style={{
-                    backgroundColor: '#fff',
-                    borderRadius: '12px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                    overflow: 'hidden'
-                }}>
-                    {loading ? (
-                        <div style={{
-                            textAlign: 'center',
-                            padding: '60px',
-                            color: '#999',
-                            fontSize: '18px'
-                        }}>
-                            Loading leaderboard...
-                        </div>
-                    ) : sortedData.length === 0 ? (
-                        <div style={{
-                            textAlign: 'center',
-                            padding: '60px',
-                            color: '#999',
-                            fontSize: '18px'
-                        }}>
-                            No traders found. Post {minSignals}+ signals to appear on the leaderboard! 📊
-                        </div>
-                    ) : (
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{
-                                width: '100%',
-                                borderCollapse: 'collapse'
-                            }}>
-                                <thead>
-                                    <tr style={{
-                                        backgroundColor: '#f5f5f5',
-                                        borderBottom: '2px solid #ddd'
-                                    }}>
-                                        <th style={tableHeaderStyle}>Rank</th>
-                                        <th style={tableHeaderStyle}>Trader</th>
-                                        <th style={tableHeaderStyle}>Win Rate</th>
-                                        <th style={tableHeaderStyle}>Completed</th>
-                                        <th style={tableHeaderStyle}>Won</th>
-                                        <th style={tableHeaderStyle}>Lost</th>
-                                        <th style={tableHeaderStyle}>Pending</th>
-                                        <th style={tableHeaderStyle}>Total Pips</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {sortedData.map((trader, index) => {
-                                        const tierBadge = getTierBadge(trader.tier);
-                                        return (
-                                            <tr
-                                                key={trader.username}
-                                                style={{
-                                                    borderBottom: '1px solid #eee',
-                                                    backgroundColor: index < 3 ? '#fffef0' : (index % 2 === 0 ? '#fff' : '#fafafa'),
-                                                    transition: 'background-color 0.2s'
-                                                }}
-                                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f7ff'}
-                                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = index < 3 ? '#fffef0' : (index % 2 === 0 ? '#fff' : '#fafafa')}
-                                            >
-                                                <td style={{
-                                                    ...tableCellStyle,
-                                                    fontWeight: 'bold',
-                                                    fontSize: '18px'
-                                                }}>
-                                                    {getRankEmoji(index)}
-                                                </td>
-                                                <td style={tableCellStyle}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                        <strong style={{ fontSize: '16px' }}>{trader.username}</strong>
-                                                        {tierBadge && (
-                                                            <span style={{
-                                                                padding: '2px 8px',
-                                                                borderRadius: '8px',
-                                                                fontSize: '11px',
-                                                                fontWeight: 'bold',
-                                                                backgroundColor: tierBadge.color,
-                                                                color: 'white'
-                                                            }}>
-                                                                {tierBadge.emoji} {tierBadge.text}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td style={tableCellStyle}>
-                                                    <span style={{
-                                                        padding: '4px 12px',
-                                                        borderRadius: '12px',
-                                                        fontSize: '14px',
-                                                        fontWeight: 'bold',
-                                                        backgroundColor: parseFloat(trader.winRate) >= 60 ? '#4CAF50' :
-                                                            parseFloat(trader.winRate) >= 40 ? '#FF9800' : '#f44336',
-                                                        color: 'white'
-                                                    }}>
-                                                        {trader.winRate}%
-                                                    </span>
-                                                </td>
-                                                <td style={tableCellStyle}>
-                                                    <strong>{trader.completedSignals}</strong>
-                                                </td>
-                                                <td style={{ ...tableCellStyle, color: '#4CAF50', fontWeight: 'bold' }}>
-                                                    {trader.won}
-                                                </td>
-                                                <td style={{ ...tableCellStyle, color: '#f44336', fontWeight: 'bold' }}>
-                                                    {trader.lost}
-                                                </td>
-                                                <td style={{ ...tableCellStyle, color: '#FF9800', fontWeight: 'bold' }}>
-                                                    {trader.pending}
-                                                </td>
-                                                <td style={{
-                                                    ...tableCellStyle,
-                                                    color: trader.totalPips >= 0 ? '#4CAF50' : '#f44336',
-                                                    fontWeight: 'bold',
-                                                    fontSize: '16px'
-                                                }}>
-                                                    {trader.totalPips > 0 ? '+' : ''}{trader.totalPips.toFixed(1)}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-
-                {/* Stats Summary */}
-                {!loading && sortedData.length > 0 && (
+                {loading ? (
                     <div style={{
+                        textAlign: 'center',
+                        padding: '60px',
+                        color: '#999',
+                        fontSize: '18px',
                         backgroundColor: '#fff',
-                        padding: '20px',
-                        borderRadius: '12px',
-                        marginTop: '20px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        borderRadius: '12px'
                     }}>
-                        <h3 style={{ margin: '0 0 15px 0' }}>📊 Summary Statistics</h3>
+                        Loading analytics...
+                    </div>
+                ) : signals.length === 0 ? (
+                    <div style={{
+                        textAlign: 'center',
+                        padding: '60px',
+                        color: '#999',
+                        fontSize: '18px',
+                        backgroundColor: '#fff',
+                        borderRadius: '12px'
+                    }}>
+                        No signals found. Start posting official signals to see your analytics! 📊
+                    </div>
+                ) : (
+                    <>
                         <div style={{
                             display: 'grid',
                             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                            gap: '15px'
+                            gap: '15px',
+                            marginBottom: '20px'
                         }}>
-                            <StatBox
-                                label="Total Traders"
-                                value={sortedData.length}
-                                icon="👥"
-                                color="#2196F3"
-                            />
-                            <StatBox
-                                label="Avg Win Rate"
-                                value={`${(sortedData.reduce((sum, t) => sum + parseFloat(t.winRate), 0) / sortedData.length).toFixed(1)}%`}
-                                icon="🎯"
-                                color="#4CAF50"
-                            />
-                            <StatBox
-                                label="Total Signals"
-                                value={sortedData.reduce((sum, t) => sum + t.totalSignals, 0)}
-                                icon="📊"
-                                color="#FF9800"
-                            />
-                            <StatBox
-                                label="Total Pips"
-                                value={`${sortedData.reduce((sum, t) => sum + t.totalPips, 0).toFixed(1)}`}
-                                icon="💰"
-                                color={sortedData.reduce((sum, t) => sum + t.totalPips, 0) >= 0 ? '#4CAF50' : '#f44336'}
-                            />
+                            <StatCard label="Total Signals" value={stats.totalSignals} icon="📊" color="#2196F3" />
+                            <StatCard label="Win Rate" value={`${stats.winRate}%`} icon="🎯" color={parseFloat(stats.winRate) >= 60 ? '#4CAF50' : parseFloat(stats.winRate) >= 40 ? '#FF9800' : '#f44336'} />
+                            <StatCard label="Total Pips" value={parseFloat(stats.totalPips) > 0 ? `+${stats.totalPips}` : stats.totalPips} icon="💰" color={parseFloat(stats.totalPips) >= 0 ? '#4CAF50' : '#f44336'} />
+                            <StatCard label="Won" value={stats.won} icon="✅" color="#4CAF50" />
+                            <StatCard label="Lost" value={stats.lost} icon="❌" color="#f44336" />
+                            <StatCard label="Pending" value={stats.pending} icon="🟡" color="#FF9800" />
                         </div>
-                    </div>
+
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                            gap: '15px',
+                            marginBottom: '20px'
+                        }}>
+                            <InfoCard label="Best Performing Pair" value={stats.bestPair} icon="🏆" color="#4CAF50" />
+                            <InfoCard label="Worst Performing Pair" value={stats.worstPair} icon="📉" color="#f44336" />
+                            <InfoCard label="Current Streak" value={stats.currentStreak > 0 ? `${stats.currentStreak} ${stats.streakType === 'win' ? '🔥 Wins' : '❄️ Losses'}` : 'No active streak'} icon={stats.streakType === 'win' ? '🔥' : '❄️'} color={stats.streakType === 'win' ? '#4CAF50' : '#f44336'} />
+                        </div>
+
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+                            gap: '20px',
+                            marginBottom: '20px'
+                        }}>
+                            {timelineData.length > 0 && (
+                                <div style={{
+                                    backgroundColor: '#fff',
+                                    padding: '20px',
+                                    borderRadius: '12px',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                                }}>
+                                    <h3 style={{ margin: '0 0 20px 0' }}>📈 Cumulative Pips Over Time</h3>
+                                    <ResponsiveContainer width="100%" height={300}>
+                                        <LineChart data={timelineData}>
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis dataKey="date" />
+                                            <YAxis />
+                                            <Tooltip />
+                                            <Legend />
+                                            <Line type="monotone" dataKey="pips" stroke="#2196F3" strokeWidth={2} />
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            )}
+
+                            {pieData.length > 0 && (
+                                <div style={{
+                                    backgroundColor: '#fff',
+                                    padding: '20px',
+                                    borderRadius: '12px',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                                }}>
+                                    <h3 style={{ margin: '0 0 20px 0' }}>🥧 Win/Loss Distribution</h3>
+                                    <ResponsiveContainer width="100%" height={300}>
+                                        <PieChart>
+                                            <Pie
+                                                data={pieData}
+                                                cx="50%"
+                                                cy="50%"
+                                                labelLine={false}
+                                                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                                outerRadius={80}
+                                                fill="#8884d8"
+                                                dataKey="value"
+                                            >
+                                                {pieData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            )}
+                        </div>
+
+                        {pairPerformance.length > 0 && (
+                            <div style={{
+                                backgroundColor: '#fff',
+                                padding: '20px',
+                                borderRadius: '12px',
+                                marginBottom: '20px',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}>
+                                <h3 style={{ margin: '0 0 20px 0' }}>📊 Performance by Pair (Top 10)</h3>
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <BarChart data={pairPerformance}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="pair" />
+                                        <YAxis />
+                                        <Tooltip />
+                                        <Legend />
+                                        <Bar dataKey="pips" fill="#2196F3" />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
+
+                        <div style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                            overflow: 'hidden'
+                        }}>
+                            <div style={{ padding: '20px', borderBottom: '2px solid #f0f0f0' }}>
+                                <h3 style={{ margin: 0 }}>📋 Trade History ({filteredSignals.length})</h3>
+                            </div>
+                            <div style={{ overflowX: 'auto', maxHeight: '500px', overflowY: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f5f5f5', zIndex: 1 }}>
+                                        <tr>
+                                            <th style={tableHeaderStyle}>Date</th>
+                                            <th style={tableHeaderStyle}>Pair</th>
+                                            <th style={tableHeaderStyle}>Direction</th>
+                                            <th style={tableHeaderStyle}>Entry</th>
+                                            <th style={tableHeaderStyle}>SL</th>
+                                            <th style={tableHeaderStyle}>TP</th>
+                                            <th style={tableHeaderStyle}>Outcome</th>
+                                            <th style={tableHeaderStyle}>Close</th>
+                                            <th style={tableHeaderStyle}>Pips</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredSignals.reverse().map((signal, index) => (
+                                            <tr key={signal.id} style={{
+                                                borderBottom: '1px solid #eee',
+                                                backgroundColor: index % 2 === 0 ? '#fff' : '#fafafa'
+                                            }}>
+                                                <td style={tableCellStyle}>{new Date(signal.created_at).toLocaleDateString()}</td>
+                                                <td style={tableCellStyle}><strong>{signal.signal.pair}</strong></td>
+                                                <td style={{
+                                                    ...tableCellStyle,
+                                                    color: signal.signal.direction === 'BUY' ? '#4CAF50' : '#f44336',
+                                                    fontWeight: 'bold'
+                                                }}>{signal.signal.direction}</td>
+                                                <td style={tableCellStyle}>{signal.signal.entry}</td>
+                                                <td style={tableCellStyle}>{signal.signal.stopLoss}</td>
+                                                <td style={tableCellStyle}>{signal.signal.takeProfit}</td>
+                                                <td style={tableCellStyle}>
+                                                    <span style={{
+                                                        padding: '4px 10px',
+                                                        borderRadius: '12px',
+                                                        fontSize: '12px',
+                                                        fontWeight: 'bold',
+                                                        backgroundColor: signal.outcome === 'win' ? '#4CAF50' :
+                                                            signal.outcome === 'loss' ? '#f44336' : '#FF9800',
+                                                        color: 'white'
+                                                    }}>
+                                                        {signal.outcome === 'win' ? '✅ Win' :
+                                                            signal.outcome === 'loss' ? '❌ Loss' : '🟡 Pending'}
+                                                    </span>
+                                                </td>
+                                                <td style={tableCellStyle}>{signal.metadata?.close_price || '-'}</td>
+                                                <td style={{
+                                                    ...tableCellStyle,
+                                                    color: signal.pips >= 0 ? '#4CAF50' : '#f44336',
+                                                    fontWeight: 'bold'
+                                                }}>
+                                                    {signal.outcome !== 'pending'
+                                                        ? `${signal.pips > 0 ? '+' : ''}${signal.pips.toFixed(1)}`
+                                                        : '-'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </>
                 )}
             </div>
         </div>
     );
 }
 
-function StatBox({ label, value, icon, color }) {
+function StatCard({ label, value, icon, color }) {
     return (
         <div style={{
-            padding: '15px',
-            borderRadius: '8px',
-            border: `2px solid ${color}`,
-            backgroundColor: `${color}10`
+            backgroundColor: '#fff',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            borderLeft: `4px solid ${color}`
         }}>
-            <div style={{
-                fontSize: '24px',
-                marginBottom: '5px'
-            }}>
-                {icon}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                    <p style={{ margin: 0, color: '#999', fontSize: '14px' }}>{label}</p>
+                    <h2 style={{ margin: '8px 0 0 0', color: color, fontSize: '32px' }}>{value}</h2>
+                </div>
+                <div style={{ fontSize: '40px' }}>{icon}</div>
             </div>
-            <div style={{
-                fontSize: '12px',
-                color: '#666',
-                marginBottom: '5px'
-            }}>
-                {label}
-            </div>
-            <div style={{
-                fontSize: '24px',
-                fontWeight: 'bold',
-                color: color
-            }}>
-                {value}
+        </div>
+    );
+}
+
+function InfoCard({ label, value, icon, color }) {
+    return (
+        <div style={{
+            backgroundColor: '#fff',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            borderTop: `4px solid ${color}`
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ fontSize: '32px' }}>{icon}</div>
+                <div>
+                    <p style={{ margin: 0, color: '#999', fontSize: '13px' }}>{label}</p>
+                    <h3 style={{ margin: '5px 0 0 0', color: '#333', fontSize: '18px' }}>{value}</h3>
+                </div>
             </div>
         </div>
     );
 }
 
 const tableHeaderStyle = {
-    padding: '15px 12px',
+    padding: '12px',
     textAlign: 'left',
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: 'bold',
     color: '#666',
     textTransform: 'uppercase',
-    letterSpacing: '0.5px'
+    letterSpacing: '0.5px',
+    borderBottom: '2px solid #ddd'
 };
 
 const tableCellStyle = {
-    padding: '15px 12px',
+    padding: '12px',
     fontSize: '14px'
 };
 
-export default Leaderboard;
+export default Analytics;
