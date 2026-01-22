@@ -1307,6 +1307,21 @@ function Chat({ onUsernameSet }) {
           >
             🏆 Leaderboard
           </button>
+          <button
+            onClick={() => window.location.href = '/analytics'}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#9C27B0',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '14px'
+            }}
+          >
+            📊 Analytics
+          </button>
 
           {pendingInvitations.length > 0 && (
             <button

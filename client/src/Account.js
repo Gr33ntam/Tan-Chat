@@ -546,6 +546,35 @@ function Account({ username: propUsername, onLogout }) {
           </>
         )}
 
+        {/* Analytics Link */}
+        <div style={{
+          backgroundColor: '#fff',
+          padding: '25px',
+          borderRadius: '12px',
+          marginBottom: '20px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+        }}>
+          <button
+            onClick={() => navigate('/analytics')}
+            style={{
+              width: '100%',
+              padding: '18px',
+              backgroundColor: '#9C27B0',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: '16px',
+              boxShadow: '0 4px 8px rgba(156,39,176,0.3)'
+            }}
+          >
+            📊 View My Trading Analytics
+          </button>
+        </div>
+
+        {/* Access Info */}
+
         {/* Access Info */}
         <div style={{
           backgroundColor: '#fff',
