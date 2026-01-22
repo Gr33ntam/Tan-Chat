@@ -4,7 +4,7 @@ import Chat from './Chat';
 import Admin from './Admin';
 import Account from './Account';
 import Leaderboard from './Leaderboard';
-import SignalHistory from './SignalHistory';
+import Analytics from './Analytics';  // ← DID YOU ADD THIS?
 
 function App() {
   const [username, setUsername] = useState('');
@@ -21,7 +21,7 @@ function App() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/account" element={<Account username={username} onLogout={handleLogout} />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
-        <Route path="/signal-history" element={<SignalHistory />} />
+        <Route path="/analytics" element={<Analytics />} />  {/* ← AND THIS? */}
       </Routes>
     </Router>
   );
