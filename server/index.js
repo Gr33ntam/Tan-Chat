@@ -883,6 +883,71 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // Delete private room
+  socket.on('delete_room', async ({ roomId, username }) => {
+    try {
+      // Get room details to verify creator
+      const { data: room, error: roomError } = await supabase
+        .from('private_rooms')
+        .select('*')
+        .eq('room_id', roomId)
+        .single();
+
+      if (roomError || !room) {
+        socket.emit('delete_room_error', 'Room not found');
+        return;
+      }
+
+      // Verify the user is the creator
+      if (room.owner_username !== username) {
+        socket.emit('delete_room_error', 'Only the room creator can delete this room');
+        return;
+      }
+
+      // Delete all messages in the room
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('room', roomId);
+
+      // Delete room invitations
+      await supabase
+        .from('room_invitations')
+        .delete()
+        .eq('room_id', roomId);
+
+      // Delete room members
+      await supabase
+        .from('room_members')
+        .delete()
+        .eq('room_id', roomId);
+
+      // Delete the room itself
+      const { error: deleteError } = await supabase
+        .from('private_rooms')
+        .delete()
+        .eq('room_id', roomId);
+
+      if (deleteError) {
+        console.error('Error deleting room:', deleteError);
+        socket.emit('delete_room_error', 'Failed to delete room');
+        return;
+      }
+
+      // Notify all users that the room was deleted
+      io.emit('room_deleted', {
+        roomId: roomId,
+        roomName: room.name
+      });
+
+      console.log(`Room ${room.name} (${roomId}) deleted by ${username}`);
+
+    } catch (err) {
+      console.error('Error in delete_room:', err);
+      socket.emit('delete_room_error', 'Server error');
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });

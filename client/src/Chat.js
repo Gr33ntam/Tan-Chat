@@ -695,6 +695,8 @@ function Chat({ onUsernameSet }) {
   const [inviteUsername, setInviteUsername] = useState('');
   const [pendingInvitations, setPendingInvitations] = useState([]);
   const [showInvitationsModal, setShowInvitationsModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);  // ADD THIS
+  const [roomToDelete, setRoomToDelete] = useState(null);  // ADD THIS
 
   // Signal form state
   const [signalData, setSignalData] = useState({
@@ -713,7 +715,7 @@ function Chat({ onUsernameSet }) {
 
   // Outcome update form state
   const [outcomeData, setOutcomeData] = useState({
-    outcome: 'won',
+    outcome: 'win',
     closePrice: '',
     closedBy: 'tp'
   });
@@ -832,8 +834,11 @@ function Chat({ onUsernameSet }) {
     });
 
     socket.on('my_rooms', (data) => {
+      console.log('my_rooms payload:', data.rooms);
       setPrivateRooms(data.rooms || []);
     });
+
+
 
     socket.on('room_members', (data) => {
       setRoomMembers(data.members || []);
@@ -877,9 +882,29 @@ function Chat({ onUsernameSet }) {
       loadPrivateRooms();
     });
 
-    socket.on('room_members', (data) => {
-      setRoomMembers(data.members || []);
+    socket.on('room_deleted', ({ roomId, roomName }) => {
+      // refresh rooms list
+      loadPrivateRooms();
+
+      // if user is currently inside deleted room, send them to general
+      setCurrentRoom(prev => (prev === roomId ? 'general' : prev));
+
+      // close management modal if it was open
+      setShowRoomManagementModal(false);
+      setSelectedRoom(null);
+
+      // close delete modal
+      setShowDeleteModal(false);
+      setRoomToDelete(null);
+
+      alert(`🗑️ Room "${roomName}" has been deleted`);
     });
+
+    socket.on('delete_room_error', (message) => {
+      alert(`❌ ${message}`);
+    });
+
+
 
     return () => {
       socket.off('user_registered');
@@ -904,6 +929,9 @@ function Chat({ onUsernameSet }) {
       socket.off('invitation_accepted');
       socket.off('invitation_declined');
       socket.off('refresh_rooms');
+      socket.off('room_deleted');
+      socket.off('delete_room_error');
+
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, userTier]);
@@ -920,6 +948,21 @@ function Chat({ onUsernameSet }) {
     setShowRoomManagementModal(true);
     loadRoomMembers(room.id);
   };
+
+  const openDeleteRoomModal = (room) => {
+    setRoomToDelete({ id: room.id, name: room.name });
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteRoom = () => {
+    if (!roomToDelete) return;
+
+    socket.emit('delete_room', {
+      roomId: roomToDelete.id,
+      username
+    });
+  };
+
 
   const inviteUser = () => {
     if (!inviteUsername.trim()) {
@@ -1011,7 +1054,7 @@ function Chat({ onUsernameSet }) {
     setSelectedSignal(message);
     const currentOutcome = signalOutcomes[message.id];
     setOutcomeData({
-      outcome: currentOutcome?.outcome || 'won',
+      outcome: currentOutcome?.outcome || 'win',
       closePrice: currentOutcome?.closePrice || '',
       closedBy: currentOutcome?.closedBy || 'tp'
     });
@@ -1200,7 +1243,8 @@ function Chat({ onUsernameSet }) {
       name: `🔒 ${pr.private_rooms.name}`,
       color: '#673AB7',
       requiredTier: 'premium',
-      isPrivate: true
+      isPrivate: true,
+      ownerUsername: pr.private_rooms.owner_username
     }))
   ];
 
@@ -1376,6 +1420,38 @@ function Chat({ onUsernameSet }) {
               >
                 {room.name} {!hasAccess && '🔒'}
               </button>
+
+              {/* DELETE ROOM (owner only) */}
+              {room.isPrivate && hasAccess && room.ownerUsername === username && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openDeleteRoomModal(room);
+                  }}
+                  style={{
+                    position: 'absolute',
+                    top: '4px',
+                    right: '32px',
+                    width: '24px',
+                    height: '24px',
+                    padding: 0,
+                    backgroundColor: 'rgba(244,67,54,0.85)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  title="Delete Room"
+                >
+                  🗑️
+                </button>
+              )}
+
+              {/* MANAGE ROOM */}
               {room.isPrivate && hasAccess && (
                 <button
                   onClick={(e) => {
@@ -1408,6 +1484,7 @@ function Chat({ onUsernameSet }) {
           );
         })}
       </div>
+
 
       {/* Messages */}
       <div style={{
@@ -1972,6 +2049,78 @@ function Chat({ onUsernameSet }) {
           onDecline={declineInvitation}
         />
       )}
+
+      {/* Delete Room Confirmation Modal */}
+      {showDeleteModal && roomToDelete && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '16px',
+            padding: '30px',
+            maxWidth: '500px',
+            width: '90%'
+          }}>
+            <h2 style={{ marginTop: 0 }}>🗑️ Delete Room</h2>
+
+            <p style={{ color: '#666', marginBottom: '10px' }}>
+              Are you sure you want to delete <strong>{roomToDelete.name}</strong>?
+            </p>
+
+            <p style={{ color: '#f44336', fontSize: '13px' }}>
+              This will permanently delete the room and all messages for everyone.
+            </p>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setRoomToDelete(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: '#f0f0f0',
+                  color: '#333',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={confirmDeleteRoom}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  backgroundColor: '#f44336',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Delete Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
