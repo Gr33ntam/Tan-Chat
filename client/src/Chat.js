@@ -211,7 +211,9 @@ function SignalCard({
   currentUsername,
   isFollowing,
   onFollow,
-  onUnfollow
+  onUnfollow,
+  onOpenProfile
+
 }) {
 
   const isBuy = signal.direction === 'BUY';
@@ -370,7 +372,23 @@ function SignalCard({
         alignItems: 'center'
       }}>
         <span>
-          Posted by <strong>{username}</strong>
+          Posted by{' '}
+          <button
+            onClick={() => onOpenProfile && onOpenProfile(username)}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              margin: 0,
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              color: '#2196F3'
+            }}
+            title="View profile"
+          >
+            {username}
+          </button>
+
 
           {currentUsername && currentUsername !== username && (
             <button
@@ -712,6 +730,92 @@ function InvitationsModal({ invitations, onClose, onAccept, onDecline }) {
   );
 }
 
+// Profile Modal Component
+function ProfileModal({ viewerUsername, profileUsername, isFollowing, onFollow, onUnfollow, onClose }) {
+  if (!profileUsername) return null;
+
+  const canFollow = viewerUsername && viewerUsername !== profileUsername;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 3000
+    }}>
+      <div style={{
+        backgroundColor: '#fff',
+        borderRadius: '16px',
+        padding: '24px',
+        maxWidth: '500px',
+        width: '90%'
+      }}>
+        <h2 style={{ marginTop: 0 }}>👤 {profileUsername}</h2>
+        <p style={{ color: '#666', marginTop: '6px' }}>
+          View profile and manage follow status.
+        </p>
+
+        {canFollow && (
+          <button
+            onClick={() => (isFollowing ? onUnfollow(profileUsername) : onFollow(profileUsername))}
+            style={{
+              width: '100%',
+              padding: '12px',
+              backgroundColor: isFollowing ? '#f44336' : '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              marginTop: '12px'
+            }}
+          >
+            {isFollowing ? 'Unfollow' : 'Follow'}
+          </button>
+        )}
+
+        {!canFollow && (
+          <div style={{
+            width: '100%',
+            padding: '12px',
+            backgroundColor: '#f0f0f0',
+            color: '#666',
+            borderRadius: '10px',
+            marginTop: '12px',
+            textAlign: 'center',
+            fontWeight: 'bold'
+          }}>
+            This is you
+          </div>
+        )}
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%',
+            padding: '12px',
+            backgroundColor: '#f0f0f0',
+            border: 'none',
+            borderRadius: '10px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginTop: '10px'
+          }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function Chat({ onUsernameSet }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -738,6 +842,9 @@ function Chat({ onUsernameSet }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);  // ADD THIS
   const [roomToDelete, setRoomToDelete] = useState(null);  // ADD THIS
   const [following, setFollowing] = useState([]);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileUsername, setSelectedProfileUsername] = useState(null);
+
   const selectedRoomIdRef = useRef(null);
 
   // Signal form state
@@ -1120,6 +1227,13 @@ function Chat({ onUsernameSet }) {
       following: targetUsername
     });
   };
+
+  const openProfile = (profileUser) => {
+    if (!profileUser) return;
+    setSelectedProfileUsername(profileUser);
+    setShowProfileModal(true);
+  };
+
 
 
 
@@ -1622,7 +1736,21 @@ function Chat({ onUsernameSet }) {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <strong style={{ color: currentRoomInfo.color }}>{msg.username}</strong>
+                    <button
+                      onClick={() => openProfile(msg.username)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        margin: 0,
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        color: currentRoomInfo.color
+                      }}
+                    >
+                      {msg.username}
+                    </button>
+
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '12px', color: '#999' }}>
@@ -1665,6 +1793,8 @@ function Chat({ onUsernameSet }) {
                 isFollowing={following.includes(msg.username)}
                 onFollow={followUser}
                 onUnfollow={unfollowUser}
+                onOpenProfile={openProfile}
+
 
               />
             )}
@@ -2227,6 +2357,21 @@ function Chat({ onUsernameSet }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Profile Modal */}
+      {showProfileModal && selectedProfileUsername && (
+        <ProfileModal
+          viewerUsername={username}
+          profileUsername={selectedProfileUsername}
+          isFollowing={following.includes(selectedProfileUsername)}
+          onFollow={followUser}
+          onUnfollow={unfollowUser}
+          onClose={() => {
+            setShowProfileModal(false);
+            setSelectedProfileUsername(null);
+          }}
+        />
       )}
 
     </div>
