@@ -196,7 +196,24 @@ function UpgradeModal({ currentTier, onClose, onUpgrade, suggestedTier }) {
 }
 
 // Signal Card Component
-function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDelete, canUpdate, onDelete, onUpdateOutcome, outcomeData }) {
+function SignalCard({
+  signal,
+  username,
+  timestamp,
+  formatTime,
+  isOfficial,
+  canDelete,
+  canUpdate,
+  onDelete,
+  onUpdateOutcome,
+  outcomeData,
+
+  currentUsername,
+  isFollowing,
+  onFollow,
+  onUnfollow
+}) {
+
   const isBuy = signal.direction === 'BUY';
   const outcome = outcomeData?.outcome || 'pending';
   const pipsGained = outcomeData?.pipsGained || 0;
@@ -352,7 +369,30 @@ function SignalCard({ signal, username, timestamp, formatTime, isOfficial, canDe
         justifyContent: 'space-between',
         alignItems: 'center'
       }}>
-        <span>Posted by <strong>{username}</strong></span>
+        <span>
+          Posted by <strong>{username}</strong>
+
+          {currentUsername && currentUsername !== username && (
+            <button
+              onClick={() => (isFollowing ? onUnfollow(username) : onFollow(username))}
+              style={{
+                marginLeft: '10px',
+                padding: '4px 10px',
+                backgroundColor: isFollowing ? '#f44336' : '#4CAF50',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }}
+              title={isFollowing ? 'Unfollow' : 'Follow'}
+            >
+              {isFollowing ? 'Unfollow' : 'Follow'}
+            </button>
+          )}
+        </span>
+
         {canUpdate && (
           <button
             onClick={onUpdateOutcome}
@@ -697,6 +737,8 @@ function Chat({ onUsernameSet }) {
   const [showInvitationsModal, setShowInvitationsModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);  // ADD THIS
   const [roomToDelete, setRoomToDelete] = useState(null);  // ADD THIS
+  const [following, setFollowing] = useState([]);
+  const selectedRoomIdRef = useRef(null);
 
   // Signal form state
   const [signalData, setSignalData] = useState({
@@ -735,6 +777,7 @@ function Chat({ onUsernameSet }) {
   useEffect(() => {
     if (joined && username) {
       socket.emit('register_user', username);
+      socket.emit('get_following', username);
       loadPrivateRooms();
       loadPendingInvitations();
       if (onUsernameSet) {
@@ -839,21 +882,21 @@ function Chat({ onUsernameSet }) {
     });
 
 
-
     socket.on('room_members', (data) => {
       setRoomMembers(data.members || []);
     });
 
     socket.on('invite_success', (data) => {
       alert(`✅ ${data.message}`);
-      loadRoomMembers(selectedRoom?.id);
+      loadRoomMembers(selectedRoomIdRef.current);
       setInviteUsername('');
     });
 
     socket.on('remove_success', (data) => {
       alert(`✅ ${data.message}`);
-      loadRoomMembers(selectedRoom?.id);
+      loadRoomMembers(selectedRoomIdRef.current);
     });
+
 
     socket.on('new_invitation', (data) => {
       if (data.inviteeUsername === username) {
@@ -904,6 +947,26 @@ function Chat({ onUsernameSet }) {
       alert(`❌ ${message}`);
     });
 
+    socket.on('following_list', (data) => {
+      setFollowing(data.following || []);
+    });
+
+    socket.on('follow_success', (data) => {
+      setFollowing(prev => [...new Set([...prev, data.following])]);
+    });
+
+    socket.on('unfollow_success', (data) => {
+      setFollowing(prev => prev.filter(u => u !== data.following));
+    });
+
+    socket.on('follow_error', (message) => {
+      alert(`❌ ${message}`);
+    });
+
+    socket.on('unfollow_error', (message) => {
+      alert(`❌ ${message}`);
+    });
+
 
 
     return () => {
@@ -931,6 +994,12 @@ function Chat({ onUsernameSet }) {
       socket.off('refresh_rooms');
       socket.off('room_deleted');
       socket.off('delete_room_error');
+      socket.off('following_list');
+      socket.off('follow_success');
+      socket.off('unfollow_success');
+      socket.off('follow_error');
+      socket.off('unfollow_error');
+
 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -944,10 +1013,12 @@ function Chat({ onUsernameSet }) {
   };
 
   const openRoomManagement = (room) => {
+    selectedRoomIdRef.current = room.id; // ✅ save room id
     setSelectedRoom(room);
     setShowRoomManagementModal(true);
     loadRoomMembers(room.id);
   };
+
 
   const openDeleteRoomModal = (room) => {
     setRoomToDelete({ id: room.id, name: room.name });
@@ -1034,6 +1105,23 @@ function Chat({ onUsernameSet }) {
   const canCreatePrivateRoom = () => {
     return userTier === 'premium';
   };
+
+
+  const followUser = (targetUsername) => {
+    socket.emit('follow_user', {
+      follower: username,
+      following: targetUsername
+    });
+  };
+
+  const unfollowUser = (targetUsername) => {
+    socket.emit('unfollow_user', {
+      follower: username,
+      following: targetUsername
+    });
+  };
+
+
 
   const handleLogout = () => {
     localStorage.removeItem('username');
@@ -1573,6 +1661,11 @@ function Chat({ onUsernameSet }) {
                 onDelete={() => deleteMessage(msg.id)}
                 onUpdateOutcome={() => openOutcomeModal(msg)}
                 outcomeData={signalOutcomes[msg.id]}
+                currentUsername={username}
+                isFollowing={following.includes(msg.username)}
+                onFollow={followUser}
+                onUnfollow={unfollowUser}
+
               />
             )}
           </div>
