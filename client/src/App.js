@@ -4,7 +4,8 @@ import Chat from './Chat';
 import Admin from './Admin';
 import Account from './Account';
 import Leaderboard from './Leaderboard';
-import Analytics from './Analytics';  // ← DID YOU ADD THIS?
+import Analytics from './Analytics';
+import UserProfile from './UserProfile'; // ADD THIS
 
 function App() {
   const [username, setUsername] = useState('');
@@ -21,7 +22,8 @@ function App() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/account" element={<Account username={username} onLogout={handleLogout} />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
-        <Route path="/analytics" element={<Analytics />} />  {/* ← AND THIS? */}
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/profile/:username" element={<UserProfile />} /> {/* ADD THIS */}
       </Routes>
     </Router>
   );
