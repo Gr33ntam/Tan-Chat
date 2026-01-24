@@ -36,6 +36,7 @@ function UserProfile() {
       loadUserProfile();
       checkIfFollowing();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUsername]);
 
   useEffect(() => {
